@@ -1,11 +1,15 @@
 import { useEffect, useRef } from 'react';
 import type { KeyboardEvent, PointerEvent } from 'react';
+import blackAntSpriteUrl from '../assets/ant/black.png';
+import redAntSpriteUrl from '../assets/ant/red.png';
 import beeSpriteUrl from '../assets/bee/bee.png';
+import caterpillarSpriteUrl from '../assets/caterpillar/walk.png';
 import cloud01Url from '../assets/cloud/cloud_01.png';
 import cloud02Url from '../assets/cloud/cloud_02.png';
 import cloud03Url from '../assets/cloud/cloud_03.png';
 import cloud04Url from '../assets/cloud/cloud_04.png';
 import cloud05Url from '../assets/cloud/cloud_05.png';
+import deathSunflowerSpriteUrl from '../assets/die.png';
 import moonSpriteUrl from '../assets/moon/moon.png';
 import pigeonSpriteUrl from '../assets/pidgeon/fly.png';
 import seedSpriteUrl from '../assets/seed.png';
@@ -14,6 +18,7 @@ import sproutSpriteUrl from '../assets/sprout.png';
 import sunCrownUrl from '../assets/sun/crown.png';
 import sunFaceUrl from '../assets/sun/face.png';
 import angrySunflowerSpriteUrl from '../assets/idle_angry.png';
+import veryAngrySunflowerSpriteUrl from '../assets/idle_very_angry.png';
 import sunflowerSpriteUrl from '../assets/idle_happy.png';
 import backgroundSunflowerSpriteUrl from '../assets/sunflower_background.png';
 
@@ -22,6 +27,14 @@ const ROWS = 4;
 const TOTAL_FRAMES = COLUMNS * ROWS;
 const MAIN_FRAME_WIDTH = 360;
 const MAIN_FRAME_HEIGHT = 527;
+const VERY_ANGRY_COLUMNS = 3;
+const VERY_ANGRY_FRAME_COUNT = 8;
+const DEATH_COLUMNS = 3;
+const DEATH_FRAME_COUNT = 5;
+const DEATH_FRAME_WIDTH = 400;
+const DEATH_FRAME_HEIGHT = 351;
+const DEATH_FRAME_DURATION_MS = 160;
+const DEATH_STEM_OFFSET_X = 92;
 const BACKGROUND_FRAME_WIDTH = 400;
 const BACKGROUND_FRAME_HEIGHT = 351;
 const SOIL_WIDTH = 300;
@@ -42,9 +55,28 @@ const PIGEON_FRAME_COUNT = PIGEON_COLUMNS * PIGEON_ROWS;
 const PIGEON_FRAME_WIDTH = 500;
 const PIGEON_FRAME_HEIGHT = 404;
 const PIGEON_FRAME_DURATION_MS = 50;
-const PIGEON_MIN_SPAWN_DELAY_MS = 3_000;
-const PIGEON_MAX_SPAWN_DELAY_MS = 5_000;
-const RAIN_CLOUD_CHANCE = 0.1;
+const PIGEON_MIN_SPAWN_DELAY_MS = 5_000;
+const PIGEON_MAX_SPAWN_DELAY_MS = 7_000;
+const PIGEON_MIN_SPEED = 122;
+const PIGEON_MAX_SPEED = 185;
+const CATERPILLAR_FRAME_COUNT = 2;
+const CATERPILLAR_FRAME_WIDTH = 256;
+const CATERPILLAR_FRAME_HEIGHT = 173;
+const CATERPILLAR_FRAME_DURATION_MS = 250;
+const CATERPILLAR_MIN_SPAWN_DELAY_MS = 2_000;
+const CATERPILLAR_MAX_SPAWN_DELAY_MS = 4_000;
+const CATERPILLAR_MIN_SPEED = 30;
+const CATERPILLAR_MAX_SPEED = 44;
+const ANT_COLUMNS = 5;
+const ANT_ROWS = 3;
+const ANT_FRAME_COUNT = ANT_COLUMNS * ANT_ROWS;
+const ANT_FRAME_WIDTH = 538;
+const ANT_FRAME_HEIGHT = 759;
+const ANT_FRAME_DURATION_MS = 50;
+const ANT_SPAWN_INTERVAL_MS = 2_000;
+const ANT_MIN_SPEED = 24;
+const ANT_MAX_SPEED = 36;
+const RAIN_CLOUD_CHANCE = 0.3;
 const RAIN_BURST_DURATION_MS = 1_200;
 const RAIN_STREAK_COUNT = 42;
 const RAIN_HYDRATION_MIN_SCREEN_PERCENT = 0.3;
@@ -62,6 +94,8 @@ const SEED_HEIGHT = 178;
 const DAY_DURATION_MS = 30_000;
 const NIGHT_DURATION_MS = 10_000;
 const TOTAL_CYCLE_MS = DAY_DURATION_MS + NIGHT_DURATION_MS;
+const DAMAGE_FLASH_DURATION_MS = 220;
+const DAMAGE_FLASH_FILTER = 'brightness(1.18) sepia(1) saturate(7) hue-rotate(315deg)';
 export const MAX_GROWTH_DAY = 5;
 
 export type PlantStage = 'seed' | 'sprout' | 'sunflower';
@@ -81,6 +115,8 @@ type SunflowerCanvasProps = {
   onBeePollinate: () => void;
   onRainCloudClick: () => void;
   onPigeonAttack: () => void;
+  onAntAttack: () => void;
+  onCaterpillarAttack: () => void;
   onHudUpdate: (hud: HudInfo) => void;
 };
 
@@ -140,6 +176,30 @@ type Pigeon = {
   side: -1 | 1;
 };
 
+type Ant = {
+  id: number;
+  kind: 'black' | 'red';
+  x: number;
+  baseY: number;
+  progressY: number;
+  speed: number;
+  size: number;
+  side: -1 | 1;
+  rowOffset: number;
+  phase: number;
+};
+
+type Caterpillar = {
+  id: number;
+  x: number;
+  baseY: number;
+  progressY: number;
+  speed: number;
+  width: number;
+  side: -1 | 1;
+  phase: number;
+};
+
 type Cloud = {
   imageIndex: number;
   startX: number;
@@ -168,6 +228,12 @@ type BackgroundFlower = {
   scale: number;
   phase: number;
   brightness: number;
+};
+
+type SceneDrawable = {
+  depthY: number;
+  order: number;
+  draw: () => void;
 };
 
 const BACKGROUND_FLOWERS = [
@@ -208,12 +274,12 @@ const BACKGROUND_FLOWERS = [
 ] satisfies BackgroundFlower[];
 
 const CLOUDS = [
-  { imageIndex: 4, startX: 0.08, y: 0.14, width: 0.2, speed: 9, opacity: 0.42 },
-  { imageIndex: 1, startX: 0.48, y: 0.1, width: 0.14, speed: 12, opacity: 0.34 },
-  { imageIndex: 3, startX: 0.78, y: 0.2, width: 0.16, speed: 14, opacity: 0.38 },
-  { imageIndex: 0, startX: 0.26, y: 0.25, width: 0.34, speed: 20, opacity: 0.5 },
-  { imageIndex: 2, startX: 0.66, y: 0.31, width: 0.23, speed: 24, opacity: 0.46 },
-  { imageIndex: 4, startX: 0.93, y: 0.38, width: 0.18, speed: 30, opacity: 0.4 },
+  { imageIndex: 4, startX: 0.08, y: 0.14, width: 0.2, speed: 27, opacity: 0.42 },
+  { imageIndex: 1, startX: 0.48, y: 0.1, width: 0.14, speed: 36, opacity: 0.34 },
+  { imageIndex: 3, startX: 0.78, y: 0.2, width: 0.16, speed: 42, opacity: 0.38 },
+  { imageIndex: 0, startX: 0.26, y: 0.25, width: 0.34, speed: 60, opacity: 0.5 },
+  { imageIndex: 2, startX: 0.66, y: 0.31, width: 0.23, speed: 72, opacity: 0.46 },
+  { imageIndex: 4, startX: 0.93, y: 0.38, width: 0.18, speed: 90, opacity: 0.4 },
 ] satisfies Cloud[];
 
 const SKY_COLORS = {
@@ -256,6 +322,10 @@ const getRandomBeeSpawnDelay = () =>
 
 const getRandomPigeonSpawnDelay = () =>
   PIGEON_MIN_SPAWN_DELAY_MS + Math.random() * (PIGEON_MAX_SPAWN_DELAY_MS - PIGEON_MIN_SPAWN_DELAY_MS);
+
+const getRandomCaterpillarSpawnDelay = () =>
+  CATERPILLAR_MIN_SPAWN_DELAY_MS +
+  Math.random() * (CATERPILLAR_MAX_SPAWN_DELAY_MS - CATERPILLAR_MIN_SPAWN_DELAY_MS);
 
 const getSeededNoise = (seed: number, index: number) => {
   const value = Math.sin(seed * 41.37 + index * 12.9898) * 43_758.5453;
@@ -329,6 +399,8 @@ export function SunflowerCanvas({
   onBeePollinate,
   onRainCloudClick,
   onPigeonAttack,
+  onAntAttack,
+  onCaterpillarAttack,
   onHudUpdate,
 }: SunflowerCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -340,13 +412,22 @@ export function SunflowerCanvas({
   const beeHitboxesRef = useRef<Array<Rect & { id: number }>>([]);
   const pigeonsRef = useRef<Pigeon[]>([]);
   const pigeonHitboxesRef = useRef<Array<Rect & { id: number }>>([]);
+  const antsRef = useRef<Ant[]>([]);
+  const antHitboxesRef = useRef<Array<Rect & { id: number }>>([]);
+  const caterpillarsRef = useRef<Caterpillar[]>([]);
+  const caterpillarHitboxesRef = useRef<Array<Rect & { id: number }>>([]);
   const hasSeedBrokenRef = useRef(hasSeedBroken);
   const plantHealthRef = useRef(plantHealth);
+  const previousPlantHealthRef = useRef(plantHealth);
+  const damageFlashUntilRef = useRef(0);
+  const deathStartedAtRef = useRef<number | null>(plantHealth <= 0 ? performance.now() : null);
   const seedBrokenAtRef = useRef<number | null>(null);
   const onSeedClickRef = useRef(onSeedClick);
   const onBeePollinateRef = useRef(onBeePollinate);
   const onRainCloudClickRef = useRef(onRainCloudClick);
   const onPigeonAttackRef = useRef(onPigeonAttack);
+  const onAntAttackRef = useRef(onAntAttack);
+  const onCaterpillarAttackRef = useRef(onCaterpillarAttack);
   const onHudUpdateRef = useRef(onHudUpdate);
 
   useEffect(() => {
@@ -358,7 +439,18 @@ export function SunflowerCanvas({
   }, [hasSeedBroken]);
 
   useEffect(() => {
+    if (plantHealth < previousPlantHealthRef.current) {
+      damageFlashUntilRef.current = performance.now() + DAMAGE_FLASH_DURATION_MS;
+    }
+
+    if (plantHealth <= 0 && previousPlantHealthRef.current > 0) {
+      deathStartedAtRef.current = performance.now();
+    } else if (plantHealth > 0) {
+      deathStartedAtRef.current = null;
+    }
+
     plantHealthRef.current = plantHealth;
+    previousPlantHealthRef.current = plantHealth;
   }, [plantHealth]);
 
   useEffect(() => {
@@ -376,6 +468,14 @@ export function SunflowerCanvas({
   useEffect(() => {
     onPigeonAttackRef.current = onPigeonAttack;
   }, [onPigeonAttack]);
+
+  useEffect(() => {
+    onAntAttackRef.current = onAntAttack;
+  }, [onAntAttack]);
+
+  useEffect(() => {
+    onCaterpillarAttackRef.current = onCaterpillarAttack;
+  }, [onCaterpillarAttack]);
 
   useEffect(() => {
     onHudUpdateRef.current = onHudUpdate;
@@ -406,17 +506,28 @@ export function SunflowerCanvas({
     let lastPigeonUpdateTime = 0;
     let nextPigeonSpawnAt = Number.POSITIVE_INFINITY;
     let nextPigeonId = 1;
+    let lastCaterpillarUpdateTime = 0;
+    let nextCaterpillarSpawnAt = Number.POSITIVE_INFINITY;
+    let nextCaterpillarId = 1;
+    let lastAntUpdateTime = 0;
+    let nextAntSpawnAt = Number.POSITIVE_INFINITY;
+    let nextAntId = 1;
     let lastHudKey = '';
     let lastHudProgress = -1;
     let lastHudEmitTime = 0;
     let lastCloudUpdateTime = 0;
     const bees = beesRef.current;
     const pigeons = pigeonsRef.current;
+    const caterpillars = caterpillarsRef.current;
+    const ants = antsRef.current;
     const clouds = cloudsRef.current;
     const rainBursts = rainBurstsRef.current;
 
     const beeSprite = new Image();
     const pigeonSprite = new Image();
+    const caterpillarSprite = new Image();
+    const blackAntSprite = new Image();
+    const redAntSprite = new Image();
     const cloudSprites = [
       new Image(),
       new Image(),
@@ -426,6 +537,8 @@ export function SunflowerCanvas({
     ];
     const mainSunflowerSprite = new Image();
     const angrySunflowerSprite = new Image();
+    const veryAngrySunflowerSprite = new Image();
+    const deathSunflowerSprite = new Image();
     const backgroundSunflowerSprite = new Image();
     const seedSprite = new Image();
     const soilSprite = new Image();
@@ -436,9 +549,14 @@ export function SunflowerCanvas({
     const sprites = [
       beeSprite,
       pigeonSprite,
+      caterpillarSprite,
+      blackAntSprite,
+      redAntSprite,
       ...cloudSprites,
       mainSunflowerSprite,
       angrySunflowerSprite,
+      veryAngrySunflowerSprite,
+      deathSunflowerSprite,
       backgroundSunflowerSprite,
       seedSprite,
       soilSprite,
@@ -691,6 +809,7 @@ export function SunflowerCanvas({
       scale: number,
       opacity = 1,
       brightness = 1,
+      isDamageFlashing = false,
     ) => {
       const column = frame % frameColumns;
       const row = Math.floor(frame / frameColumns);
@@ -703,7 +822,9 @@ export function SunflowerCanvas({
 
       context.save();
       context.globalAlpha = opacity;
-      context.filter = `brightness(${brightness})`;
+      context.filter = isDamageFlashing
+        ? DAMAGE_FLASH_FILTER
+        : `brightness(${brightness})`;
       context.drawImage(
         sprite,
         sourceX,
@@ -718,28 +839,36 @@ export function SunflowerCanvas({
       context.restore();
     };
 
-    const drawBackgroundSunflowers = (canvasWidth: number, canvasHeight: number) => {
+    const getBackgroundSceneScale = (canvasWidth: number, canvasHeight: number) => {
       const responsiveScale = Math.min(canvasWidth / 1100, canvasHeight / 720);
-      const sceneScale = Math.min(1.22, Math.max(0.7, responsiveScale));
 
-      BACKGROUND_FLOWERS.filter((flower) => {
-        const isInCentralNearClear = flower.bottom >= 0.72 && Math.abs(flower.x - 0.5) <= 0.24;
+      return Math.min(1.22, Math.max(0.7, responsiveScale));
+    };
 
-        return !isInCentralNearClear;
-      }).forEach((flower) => {
-        drawSpriteFrame(
-          backgroundSunflowerSprite,
-          (currentFrame + flower.phase) % TOTAL_FRAMES,
-          BACKGROUND_FRAME_WIDTH,
-          BACKGROUND_FRAME_HEIGHT,
-          COLUMNS,
-          canvasWidth * flower.x,
-          canvasHeight * flower.bottom,
-          flower.scale * sceneScale,
-          1,
-          flower.brightness,
-        );
-      });
+    const shouldDrawBackgroundFlower = (flower: BackgroundFlower) => {
+      const isInCentralNearClear = flower.bottom >= 0.72 && Math.abs(flower.x - 0.5) <= 0.24;
+
+      return !isInCentralNearClear;
+    };
+
+    const drawBackgroundSunflower = (
+      flower: BackgroundFlower,
+      canvasWidth: number,
+      canvasHeight: number,
+      sceneScale: number,
+    ) => {
+      drawSpriteFrame(
+        backgroundSunflowerSprite,
+        (currentFrame + flower.phase) % TOTAL_FRAMES,
+        BACKGROUND_FRAME_WIDTH,
+        BACKGROUND_FRAME_HEIGHT,
+        COLUMNS,
+        canvasWidth * flower.x,
+        canvasHeight * flower.bottom,
+        flower.scale * sceneScale,
+        1,
+        flower.brightness,
+      );
     };
 
     const drawSeed = (canvasWidth: number, canvasHeight: number, timestamp: number) => {
@@ -750,6 +879,7 @@ export function SunflowerCanvas({
       const pivotX = drawX + seedWidth / 2;
       const pivotY = drawY + seedHeight * 0.9;
       const seedSway = Math.sin(timestamp / 380) * 0.08;
+      const isDamageFlashing = timestamp < damageFlashUntilRef.current;
 
       seedHitboxRef.current = {
         x: drawX,
@@ -759,6 +889,7 @@ export function SunflowerCanvas({
       };
 
       context.save();
+      context.filter = isDamageFlashing ? DAMAGE_FLASH_FILTER : 'none';
       context.translate(pivotX, pivotY);
       context.rotate(seedSway);
       context.drawImage(
@@ -791,10 +922,12 @@ export function SunflowerCanvas({
       const sproutPivotX = centerX;
       const sproutPivotY = soilY + soilHeight * 0.33;
       const sproutSway = Math.sin(timestamp / 460) * 0.055;
-
-      context.drawImage(soilSprite, soilX, soilY, soilWidth, soilHeight);
+      const isDamageFlashing = timestamp < damageFlashUntilRef.current;
 
       context.save();
+      context.filter = isDamageFlashing ? DAMAGE_FLASH_FILTER : 'none';
+      context.drawImage(soilSprite, soilX, soilY, soilWidth, soilHeight);
+
       context.translate(sproutPivotX, sproutPivotY);
       context.rotate(sproutSway);
       context.drawImage(
@@ -823,20 +956,65 @@ export function SunflowerCanvas({
       };
     };
 
-    const drawMainSunflower = (canvasWidth: number, canvasHeight: number, growthScale: number) => {
+    const drawMainSunflower = (
+      canvasWidth: number,
+      canvasHeight: number,
+      growthScale: number,
+      timestamp: number,
+    ) => {
       seedHitboxRef.current = null;
       const metrics = getSunflowerMetrics(canvasWidth, canvasHeight, growthScale);
-      const sunflowerSprite = plantHealthRef.current < 50 ? angrySunflowerSprite : mainSunflowerSprite;
+      const health = plantHealthRef.current;
+      const sunflowerSprite =
+        health < 25
+          ? veryAngrySunflowerSprite
+          : health < 50
+            ? angrySunflowerSprite
+            : mainSunflowerSprite;
+      const frame = health < 25 ? currentFrame % VERY_ANGRY_FRAME_COUNT : currentFrame;
+      const frameColumns = health < 25 ? VERY_ANGRY_COLUMNS : COLUMNS;
+      const isDamageFlashing = timestamp < damageFlashUntilRef.current;
 
       drawSpriteFrame(
         sunflowerSprite,
-        currentFrame,
+        frame,
         MAIN_FRAME_WIDTH,
         MAIN_FRAME_HEIGHT,
-        COLUMNS,
+        frameColumns,
         canvasWidth / 2,
         metrics.bottomY,
         metrics.scale,
+        1,
+        1,
+        isDamageFlashing,
+      );
+    };
+
+    const drawDeathSunflower = (
+      canvasWidth: number,
+      canvasHeight: number,
+      growthScale: number,
+      timestamp: number,
+    ) => {
+      seedHitboxRef.current = null;
+      const metrics = getSunflowerMetrics(canvasWidth, canvasHeight, growthScale);
+      const deathStartedAt = deathStartedAtRef.current ?? timestamp;
+      const elapsed = Math.max(0, timestamp - deathStartedAt);
+      const frame = Math.min(
+        DEATH_FRAME_COUNT - 1,
+        Math.floor(elapsed / DEATH_FRAME_DURATION_MS),
+      );
+      const deathScale = metrics.scale * (MAIN_FRAME_HEIGHT / DEATH_FRAME_HEIGHT);
+
+      drawSpriteFrame(
+        deathSunflowerSprite,
+        frame,
+        DEATH_FRAME_WIDTH,
+        DEATH_FRAME_HEIGHT,
+        DEATH_COLUMNS,
+        canvasWidth / 2 - DEATH_STEM_OFFSET_X * deathScale,
+        metrics.bottomY,
+        deathScale,
       );
     };
 
@@ -967,21 +1145,22 @@ export function SunflowerCanvas({
       });
     };
 
-    const spawnPigeon = (canvasWidth: number, canvasHeight: number, targetY: number) => {
+    const spawnPigeon = (canvasWidth: number, canvasHeight: number) => {
       const side: -1 | 1 = Math.random() < 0.5 ? -1 : 1;
       const size = Math.min(Math.max(canvasWidth * 0.12, 88), 150);
-      const x = side === -1 ? -size : canvasWidth + size;
-      const y = clamp(
-        targetY + (Math.random() - 0.5) * canvasHeight * 0.44,
-        canvasHeight * 0.14,
-        canvasHeight * 0.82,
+      const x = side === -1 ? -size * (1.1 + Math.random() * 0.8) : canvasWidth + size * (1.1 + Math.random() * 0.8);
+      const sideLane = Math.random();
+      const y = lerp(
+        canvasHeight * 0.08,
+        canvasHeight * 0.84,
+        sideLane,
       );
 
       pigeons.push({
         id: nextPigeonId,
         x,
         y,
-        speed: 82 + Math.random() * 48,
+        speed: PIGEON_MIN_SPEED + Math.random() * (PIGEON_MAX_SPEED - PIGEON_MIN_SPEED),
         size,
         wobble: Math.random() * Math.PI * 2,
         side,
@@ -1012,7 +1191,7 @@ export function SunflowerCanvas({
       }
 
       if (timestamp >= nextPigeonSpawnAt) {
-        spawnPigeon(canvasWidth, canvasHeight, target.y);
+        spawnPigeon(canvasWidth, canvasHeight);
         nextPigeonSpawnAt = timestamp + getRandomPigeonSpawnDelay();
       }
 
@@ -1035,7 +1214,11 @@ export function SunflowerCanvas({
       }
     };
 
-    const drawPigeons = (timestamp: number) => {
+    const queuePigeons = (
+      drawables: SceneDrawable[],
+      getOrder: () => number,
+      timestamp: number,
+    ) => {
       const pigeonFrame = Math.floor(timestamp / PIGEON_FRAME_DURATION_MS) % PIGEON_FRAME_COUNT;
 
       pigeonHitboxesRef.current = pigeons.map((pigeon) => {
@@ -1055,28 +1238,292 @@ export function SunflowerCanvas({
           height: drawHeight,
         };
 
-        context.save();
-        context.translate(pigeon.x, pigeon.y + hoverY);
+        drawables.push({
+          depthY: drawY + drawHeight,
+          order: getOrder(),
+          draw: () => {
+            context.save();
+            context.translate(pigeon.x, pigeon.y + hoverY);
 
-        if (shouldFlip) {
-          context.scale(-1, 1);
-        }
+            if (shouldFlip) {
+              context.scale(-1, 1);
+            }
 
-        context.drawImage(
-          pigeonSprite,
-          column * PIGEON_FRAME_WIDTH,
-          row * PIGEON_FRAME_HEIGHT,
-          PIGEON_FRAME_WIDTH,
-          PIGEON_FRAME_HEIGHT,
-          -drawWidth / 2,
-          -drawHeight / 2,
-          drawWidth,
-          drawHeight,
-        );
-        context.restore();
+            context.drawImage(
+              pigeonSprite,
+              column * PIGEON_FRAME_WIDTH,
+              row * PIGEON_FRAME_HEIGHT,
+              PIGEON_FRAME_WIDTH,
+              PIGEON_FRAME_HEIGHT,
+              -drawWidth / 2,
+              -drawHeight / 2,
+              drawWidth,
+              drawHeight,
+            );
+            context.restore();
+          },
+        });
 
         return hitbox;
       });
+    };
+
+    const getAntTarget = (canvasWidth: number, canvasHeight: number) => ({
+      x: canvasWidth / 2,
+      y: canvasHeight * 0.89,
+      radius: Math.max(22, Math.min(canvasWidth, canvasHeight) * 0.045),
+    });
+
+    const spawnCaterpillar = (canvasWidth: number, canvasHeight: number) => {
+      const side: -1 | 1 = Math.random() < 0.5 ? -1 : 1;
+      const width = clamp(canvasWidth * 0.105, 76, 128);
+      const rowOffset = (Math.random() - 0.5) * Math.max(14, canvasHeight * 0.035);
+      const baseY = clamp(canvasHeight * 0.905 + rowOffset, canvasHeight * 0.84, canvasHeight * 0.97);
+      const x = side === -1 ? -width : canvasWidth + width;
+
+      caterpillars.push({
+        id: nextCaterpillarId,
+        x,
+        baseY,
+        progressY: 0,
+        speed:
+          CATERPILLAR_MIN_SPEED +
+          Math.random() * (CATERPILLAR_MAX_SPEED - CATERPILLAR_MIN_SPEED),
+        width,
+        side,
+        phase: Math.random() * Math.PI * 2,
+      });
+      nextCaterpillarId += 1;
+    };
+
+    const updateCaterpillars = (
+      canvasWidth: number,
+      canvasHeight: number,
+      timestamp: number,
+      lifecycle: PlantLifecycle,
+    ) => {
+      const elapsedSeconds =
+        lastCaterpillarUpdateTime === 0 ? 0 : (timestamp - lastCaterpillarUpdateTime) / 1_000;
+      lastCaterpillarUpdateTime = timestamp;
+
+      if (lifecycle.stage === 'seed') {
+        caterpillars.splice(0);
+        nextCaterpillarSpawnAt = Number.POSITIVE_INFINITY;
+        return;
+      }
+
+      if (!Number.isFinite(nextCaterpillarSpawnAt)) {
+        nextCaterpillarSpawnAt = timestamp + getRandomCaterpillarSpawnDelay();
+      }
+
+      if (timestamp >= nextCaterpillarSpawnAt) {
+        spawnCaterpillar(canvasWidth, canvasHeight);
+        nextCaterpillarSpawnAt = timestamp + getRandomCaterpillarSpawnDelay();
+      }
+
+      const target = getAntTarget(canvasWidth, canvasHeight);
+
+      for (let index = caterpillars.length - 1; index >= 0; index -= 1) {
+        const caterpillar = caterpillars[index];
+        const direction = caterpillar.side === -1 ? 1 : -1;
+
+        caterpillar.x += direction * caterpillar.speed * elapsedSeconds;
+        caterpillar.progressY += caterpillar.speed * elapsedSeconds;
+
+        if (Math.abs(target.x - caterpillar.x) <= target.radius) {
+          caterpillars.splice(index, 1);
+          onCaterpillarAttackRef.current();
+        }
+      }
+    };
+
+    const queueCaterpillars = (
+      drawables: SceneDrawable[],
+      getOrder: () => number,
+      timestamp: number,
+    ) => {
+      const caterpillarFrame =
+        Math.floor(timestamp / CATERPILLAR_FRAME_DURATION_MS) % CATERPILLAR_FRAME_COUNT;
+
+      caterpillarHitboxesRef.current = caterpillars.map((caterpillar) => {
+        const waveY =
+          Math.sin(timestamp / 380 + caterpillar.phase + caterpillar.progressY * 0.025) *
+          Math.max(2, caterpillar.width * 0.025);
+        const drawWidth = caterpillar.width;
+        const drawHeight = drawWidth * (CATERPILLAR_FRAME_HEIGHT / CATERPILLAR_FRAME_WIDTH);
+        const drawX = caterpillar.x - drawWidth / 2;
+        const drawY = caterpillar.baseY + waveY - drawHeight;
+        const hitbox = {
+          id: caterpillar.id,
+          x: drawX,
+          y: drawY,
+          width: drawWidth,
+          height: drawHeight,
+        };
+
+        drawables.push({
+          depthY: caterpillar.baseY + waveY,
+          order: getOrder(),
+          draw: () => {
+            context.save();
+            context.translate(caterpillar.x, caterpillar.baseY + waveY - drawHeight / 2);
+
+            if (caterpillar.side === -1) {
+              context.scale(-1, 1);
+            }
+
+            context.drawImage(
+              caterpillarSprite,
+              caterpillarFrame * CATERPILLAR_FRAME_WIDTH,
+              0,
+              CATERPILLAR_FRAME_WIDTH,
+              CATERPILLAR_FRAME_HEIGHT,
+              -drawWidth / 2,
+              -drawHeight / 2,
+              drawWidth,
+              drawHeight,
+            );
+            context.restore();
+          },
+        });
+
+        return hitbox;
+      });
+    };
+
+    const spawnAnt = (canvasWidth: number, canvasHeight: number) => {
+      const side: -1 | 1 = Math.random() < 0.5 ? -1 : 1;
+      const size = clamp(canvasWidth * 0.055, 32, 56);
+      const rowStep = Math.max(6, canvasHeight * 0.012);
+      const rowOffset = (Math.floor(Math.random() * 5) - 2) * rowStep;
+      const baseY = clamp(canvasHeight * 0.895 + rowOffset, canvasHeight * 0.82, canvasHeight * 0.96);
+      const x = side === -1 ? -size : canvasWidth + size;
+
+      ants.push({
+        id: nextAntId,
+        kind: Math.random() < 0.5 ? 'black' : 'red',
+        x,
+        baseY,
+        progressY: 0,
+        speed: ANT_MIN_SPEED + Math.random() * (ANT_MAX_SPEED - ANT_MIN_SPEED),
+        size,
+        side,
+        rowOffset,
+        phase: Math.random() * Math.PI * 2,
+      });
+      nextAntId += 1;
+    };
+
+    const updateAnts = (canvasWidth: number, canvasHeight: number, timestamp: number) => {
+      const elapsedSeconds = lastAntUpdateTime === 0 ? 0 : (timestamp - lastAntUpdateTime) / 1_000;
+      lastAntUpdateTime = timestamp;
+
+      if (!Number.isFinite(nextAntSpawnAt)) {
+        nextAntSpawnAt = timestamp + ANT_SPAWN_INTERVAL_MS;
+      }
+
+      if (timestamp >= nextAntSpawnAt) {
+        spawnAnt(canvasWidth, canvasHeight);
+        nextAntSpawnAt = timestamp + ANT_SPAWN_INTERVAL_MS;
+      }
+
+      const target = getAntTarget(canvasWidth, canvasHeight);
+
+      for (let index = ants.length - 1; index >= 0; index -= 1) {
+        const ant = ants[index];
+        const direction = ant.side === -1 ? 1 : -1;
+
+        ant.x += direction * ant.speed * elapsedSeconds;
+        ant.progressY += ant.speed * elapsedSeconds;
+
+        if (Math.abs(target.x - ant.x) <= target.radius) {
+          ants.splice(index, 1);
+          onAntAttackRef.current();
+        }
+      }
+    };
+
+    const queueAnts = (
+      drawables: SceneDrawable[],
+      getOrder: () => number,
+      timestamp: number,
+    ) => {
+      const antFrame = Math.floor(timestamp / ANT_FRAME_DURATION_MS) % ANT_FRAME_COUNT;
+      const column = antFrame % ANT_COLUMNS;
+      const row = Math.floor(antFrame / ANT_COLUMNS);
+
+      antHitboxesRef.current = ants.map((ant) => {
+        const sprite = ant.kind === 'black' ? blackAntSprite : redAntSprite;
+        const waveY =
+          Math.sin(timestamp / 330 + ant.phase + ant.progressY * 0.035) *
+          Math.max(3, ant.size * 0.1);
+        const drawHeight = ant.size;
+        const drawWidth = ant.size * (ANT_FRAME_WIDTH / ANT_FRAME_HEIGHT);
+        const centerY = ant.baseY + waveY;
+        const hitbox = {
+          id: ant.id,
+          x: ant.x - drawHeight / 2,
+          y: centerY - drawWidth / 2,
+          width: drawHeight,
+          height: drawWidth,
+        };
+
+        drawables.push({
+          depthY: centerY,
+          order: getOrder(),
+          draw: () => {
+            context.save();
+            context.translate(ant.x, centerY);
+            context.rotate(ant.side === -1 ? Math.PI / 2 : -Math.PI / 2);
+            context.drawImage(
+              sprite,
+              column * ANT_FRAME_WIDTH,
+              row * ANT_FRAME_HEIGHT,
+              ANT_FRAME_WIDTH,
+              ANT_FRAME_HEIGHT,
+              -drawWidth / 2,
+              -drawHeight / 2,
+              drawWidth,
+              drawHeight,
+            );
+            context.restore();
+          },
+        });
+
+        return hitbox;
+      });
+    };
+
+    const drawLayeredBackgroundAndEnemies = (
+      canvasWidth: number,
+      canvasHeight: number,
+      timestamp: number,
+    ) => {
+      const drawables: SceneDrawable[] = [];
+      const sceneScale = getBackgroundSceneScale(canvasWidth, canvasHeight);
+      let order = 0;
+      const getOrder = () => {
+        const currentOrder = order;
+
+        order += 1;
+        return currentOrder;
+      };
+
+      BACKGROUND_FLOWERS.filter(shouldDrawBackgroundFlower).forEach((flower) => {
+        drawables.push({
+          depthY: canvasHeight * flower.bottom,
+          order: getOrder(),
+          draw: () => drawBackgroundSunflower(flower, canvasWidth, canvasHeight, sceneScale),
+        });
+      });
+
+      queueCaterpillars(drawables, getOrder, timestamp);
+      queueAnts(drawables, getOrder, timestamp);
+      queuePigeons(drawables, getOrder, timestamp);
+
+      drawables
+        .sort((first, second) => first.depthY - second.depthY || first.order - second.order)
+        .forEach((drawable) => drawable.draw());
     };
 
     const getPlantLifecycle = (timestamp: number): PlantLifecycle => {
@@ -1138,30 +1585,48 @@ export function SunflowerCanvas({
       const canvasHeight = window.innerHeight;
       const cycleState = getCycleState(timestamp, cycleStart);
       const lifecycle = getPlantLifecycle(timestamp);
+      const isPlantDead = plantHealthRef.current <= 0;
 
       updateClouds(canvasWidth, timestamp);
-      updateBees(canvasWidth, canvasHeight, timestamp, cycleState, lifecycle);
-      updatePigeons(canvasWidth, canvasHeight, timestamp, lifecycle);
+
+      if (isPlantDead) {
+        bees.splice(0);
+        pigeons.splice(0);
+        caterpillars.splice(0);
+        ants.splice(0);
+        beeHitboxesRef.current = [];
+        pigeonHitboxesRef.current = [];
+        caterpillarHitboxesRef.current = [];
+        antHitboxesRef.current = [];
+      } else {
+        updateBees(canvasWidth, canvasHeight, timestamp, cycleState, lifecycle);
+        updatePigeons(canvasWidth, canvasHeight, timestamp, lifecycle);
+        updateCaterpillars(canvasWidth, canvasHeight, timestamp, lifecycle);
+        updateAnts(canvasWidth, canvasHeight, timestamp);
+      }
 
       context.clearRect(0, 0, canvasWidth, canvasHeight);
       drawSky(canvasWidth, canvasHeight, cycleState);
       drawClouds(canvasWidth, canvasHeight, cycleState);
       drawCelestialPath(canvasWidth, canvasHeight, cycleState, timestamp);
       drawField(canvasWidth, canvasHeight);
-      drawBackgroundSunflowers(canvasWidth, canvasHeight);
       drawGroundShadow(canvasWidth, canvasHeight);
       drawRainBursts(canvasWidth, canvasHeight, timestamp);
+      drawLayeredBackgroundAndEnemies(canvasWidth, canvasHeight, timestamp);
 
-      if (lifecycle.stage === 'seed') {
+      if (isPlantDead) {
+        const deathGrowthScale = lifecycle.stage === 'sunflower' ? lifecycle.growthScale : 0.42;
+
+        drawDeathSunflower(canvasWidth, canvasHeight, deathGrowthScale, timestamp);
+      } else if (lifecycle.stage === 'seed') {
         drawSeed(canvasWidth, canvasHeight, timestamp);
       } else if (lifecycle.stage === 'sprout') {
         drawSprout(canvasWidth, canvasHeight, timestamp);
       } else {
-        drawMainSunflower(canvasWidth, canvasHeight, lifecycle.growthScale);
+        drawMainSunflower(canvasWidth, canvasHeight, lifecycle.growthScale, timestamp);
       }
 
       drawBees(timestamp);
-      drawPigeons(timestamp);
       emitHud(timestamp, cycleState, lifecycle);
     };
 
@@ -1199,8 +1664,13 @@ export function SunflowerCanvas({
     sprites.forEach((sprite) => sprite.addEventListener('load', handleSpriteLoad));
     mainSunflowerSprite.src = sunflowerSpriteUrl;
     angrySunflowerSprite.src = angrySunflowerSpriteUrl;
+    veryAngrySunflowerSprite.src = veryAngrySunflowerSpriteUrl;
+    deathSunflowerSprite.src = deathSunflowerSpriteUrl;
     beeSprite.src = beeSpriteUrl;
     pigeonSprite.src = pigeonSpriteUrl;
+    caterpillarSprite.src = caterpillarSpriteUrl;
+    blackAntSprite.src = blackAntSpriteUrl;
+    redAntSprite.src = redAntSpriteUrl;
     cloudSprites[0].src = cloud01Url;
     cloudSprites[1].src = cloud02Url;
     cloudSprites[2].src = cloud03Url;
@@ -1218,11 +1688,15 @@ export function SunflowerCanvas({
       isMounted = false;
       bees.splice(0);
       pigeons.splice(0);
+      caterpillars.splice(0);
+      ants.splice(0);
       clouds.splice(0);
       rainBursts.splice(0);
       cloudHitboxesRef.current = [];
       beeHitboxesRef.current = [];
       pigeonHitboxesRef.current = [];
+      caterpillarHitboxesRef.current = [];
+      antHitboxesRef.current = [];
       window.cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', resizeCanvas);
       sprites.forEach((sprite) => sprite.removeEventListener('load', handleSpriteLoad));
@@ -1234,6 +1708,10 @@ export function SunflowerCanvas({
     const seedHitbox = seedHitboxRef.current;
 
     if (!canvas) {
+      return;
+    }
+
+    if (plantHealthRef.current <= 0) {
       return;
     }
 
@@ -1256,6 +1734,40 @@ export function SunflowerCanvas({
       pigeonHitboxesRef.current = pigeonHitboxesRef.current.filter(
         (hitbox) => hitbox.id !== clickedPigeon.id,
       );
+      return;
+    }
+
+    const clickedCaterpillar = caterpillarHitboxesRef.current.find((hitbox) =>
+      pointIsInside(pointerX, pointerY, hitbox),
+    );
+
+    if (clickedCaterpillar) {
+      const clickedCaterpillarIndex = caterpillarsRef.current.findIndex(
+        (caterpillar) => caterpillar.id === clickedCaterpillar.id,
+      );
+
+      if (clickedCaterpillarIndex >= 0) {
+        caterpillarsRef.current.splice(clickedCaterpillarIndex, 1);
+      }
+
+      caterpillarHitboxesRef.current = caterpillarHitboxesRef.current.filter(
+        (hitbox) => hitbox.id !== clickedCaterpillar.id,
+      );
+      return;
+    }
+
+    const clickedAnt = antHitboxesRef.current.find((hitbox) =>
+      pointIsInside(pointerX, pointerY, hitbox),
+    );
+
+    if (clickedAnt) {
+      const clickedAntIndex = antsRef.current.findIndex((ant) => ant.id === clickedAnt.id);
+
+      if (clickedAntIndex >= 0) {
+        antsRef.current.splice(clickedAntIndex, 1);
+      }
+
+      antHitboxesRef.current = antHitboxesRef.current.filter((hitbox) => hitbox.id !== clickedAnt.id);
       return;
     }
 
@@ -1318,7 +1830,7 @@ export function SunflowerCanvas({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLCanvasElement>) => {
-    if (hasSeedBroken || (event.key !== 'Enter' && event.key !== ' ')) {
+    if (plantHealthRef.current <= 0 || hasSeedBroken || (event.key !== 'Enter' && event.key !== ' ')) {
       return;
     }
 

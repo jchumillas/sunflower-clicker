@@ -283,6 +283,14 @@ body {
   color: #8bc7ff;
 }
 
+.game-hud__metric-icon--score {
+  color: #d38a18;
+}
+
+.game-hud[data-phase='night'] .game-hud__metric-icon--score {
+  color: #ffc45f;
+}
+
 .game-hud__metric-label {
   letter-spacing: 0.02em;
 }

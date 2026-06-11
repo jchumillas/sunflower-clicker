@@ -97,6 +97,19 @@ const TOTAL_CYCLE_MS = DAY_DURATION_MS + NIGHT_DURATION_MS;
 const DAMAGE_FLASH_DURATION_MS = 220;
 const DAMAGE_FLASH_FILTER = 'brightness(1.18) sepia(1) saturate(7) hue-rotate(315deg)';
 const CRITICAL_HEALTH_THRESHOLD = 25;
+const SEED_PROJECTILE_MIN_SPEED_X = 180;
+const SEED_PROJECTILE_MAX_SPEED_X = 280;
+const SEED_PROJECTILE_MIN_ANGULAR_SPEED = 5.2;
+const SEED_PROJECTILE_MAX_ANGULAR_SPEED = 8.8;
+const SEED_PROJECTILE_MIN_HEIGHT = 34;
+const SEED_PROJECTILE_MAX_HEIGHT = 58;
+const PARTICLE_COUNT = 16;
+const PARTICLE_MIN_DURATION_MS = 450;
+const PARTICLE_MAX_DURATION_MS = 700;
+const PARTICLE_COLORS = {
+  enemy: ['#f8e7a6', '#f0a34b', '#c5543d', '#7a3224'],
+  seed: ['#fff1a7', '#ffd35f', '#d98a24', '#80531c'],
+};
 export const MAX_GROWTH_DAY = 5;
 
 export type PlantStage = 'seed' | 'sprout' | 'sunflower';
@@ -119,6 +132,7 @@ type SunflowerCanvasProps = {
   onAntAttack: () => void;
   onCaterpillarAttack: () => void;
   onEnemyKilled: () => void;
+  onSunflowerHeadClick: () => void;
   onHudUpdate: (hud: HudInfo) => void;
 };
 
@@ -127,6 +141,12 @@ type Rect = {
   y: number;
   width: number;
   height: number;
+};
+
+type Circle = {
+  x: number;
+  y: number;
+  radius: number;
 };
 
 type Rgb = {
@@ -238,6 +258,31 @@ type SceneDrawable = {
   draw: () => void;
 };
 
+type SeedProjectile = {
+  id: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  gravity: number;
+  rotation: number;
+  angularVelocity: number;
+  height: number;
+};
+
+type Particle = {
+  id: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  color: string;
+  gravity: number;
+  startedAt: number;
+  duration: number;
+};
+
 const BACKGROUND_FLOWERS = [
   { x: 0.03, bottom: 0.59, scale: 0.18, phase: 2, brightness: 0.62 },
   { x: 0.13, bottom: 0.61, scale: 0.2, phase: 6, brightness: 0.64 },
@@ -300,6 +345,9 @@ const pointIsInside = (pointX: number, pointY: number, rect: Rect) =>
   pointX <= rect.x + rect.width &&
   pointY >= rect.y &&
   pointY <= rect.y + rect.height;
+
+const pointIsInsideCircle = (pointX: number, pointY: number, circle: Circle) =>
+  Math.hypot(pointX - circle.x, pointY - circle.y) <= circle.radius;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -404,10 +452,12 @@ export function SunflowerCanvas({
   onAntAttack,
   onCaterpillarAttack,
   onEnemyKilled,
+  onSunflowerHeadClick,
   onHudUpdate,
 }: SunflowerCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const seedHitboxRef = useRef<Rect | null>(null);
+  const sunflowerHeadHitboxRef = useRef<Circle | null>(null);
   const cloudsRef = useRef<CloudInstance[]>([]);
   const cloudHitboxesRef = useRef<Array<Rect & { id: number }>>([]);
   const rainBurstsRef = useRef<RainBurst[]>([]);
@@ -419,6 +469,10 @@ export function SunflowerCanvas({
   const antHitboxesRef = useRef<Array<Rect & { id: number }>>([]);
   const caterpillarsRef = useRef<Caterpillar[]>([]);
   const caterpillarHitboxesRef = useRef<Array<Rect & { id: number }>>([]);
+  const seedProjectilesRef = useRef<SeedProjectile[]>([]);
+  const particlesRef = useRef<Particle[]>([]);
+  const nextSeedProjectileIdRef = useRef(1);
+  const nextParticleIdRef = useRef(1);
   const hasSeedBrokenRef = useRef(hasSeedBroken);
   const plantHealthRef = useRef(plantHealth);
   const previousPlantHealthRef = useRef(plantHealth);
@@ -432,7 +486,66 @@ export function SunflowerCanvas({
   const onAntAttackRef = useRef(onAntAttack);
   const onCaterpillarAttackRef = useRef(onCaterpillarAttack);
   const onEnemyKilledRef = useRef(onEnemyKilled);
+  const onSunflowerHeadClickRef = useRef(onSunflowerHeadClick);
   const onHudUpdateRef = useRef(onHudUpdate);
+
+  const emitParticles = (x: number, y: number, kind: keyof typeof PARTICLE_COLORS) => {
+    const colors = PARTICLE_COLORS[kind];
+    const now = performance.now();
+
+    for (let index = 0; index < PARTICLE_COUNT; index += 1) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 70 + Math.random() * 150;
+
+      particlesRef.current.push({
+        id: nextParticleIdRef.current,
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 36 - Math.random() * 42,
+        radius: 2.2 + Math.random() * 4.6,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        gravity: 150 + Math.random() * 95,
+        startedAt: now,
+        duration:
+          PARTICLE_MIN_DURATION_MS +
+          Math.random() * (PARTICLE_MAX_DURATION_MS - PARTICLE_MIN_DURATION_MS),
+      });
+      nextParticleIdRef.current += 1;
+    }
+  };
+
+  const launchSeedProjectile = (
+    x: number,
+    y: number,
+    canvasWidth: number,
+    canvasHeight: number,
+  ) => {
+    const direction: -1 | 1 = Math.random() < 0.5 ? -1 : 1;
+    const height = clamp(canvasWidth * 0.042, SEED_PROJECTILE_MIN_HEIGHT, SEED_PROJECTILE_MAX_HEIGHT);
+    const speedX =
+      direction *
+      (SEED_PROJECTILE_MIN_SPEED_X +
+        Math.random() * (SEED_PROJECTILE_MAX_SPEED_X - SEED_PROJECTILE_MIN_SPEED_X));
+    const speedY = -clamp(canvasHeight * (0.34 + Math.random() * 0.12), 260, 430);
+    const angularVelocity =
+      direction *
+      (SEED_PROJECTILE_MIN_ANGULAR_SPEED +
+        Math.random() * (SEED_PROJECTILE_MAX_ANGULAR_SPEED - SEED_PROJECTILE_MIN_ANGULAR_SPEED));
+
+    seedProjectilesRef.current.push({
+      id: nextSeedProjectileIdRef.current,
+      x,
+      y,
+      vx: speedX,
+      vy: speedY,
+      gravity: clamp(canvasHeight * 0.78, 470, 760),
+      rotation: Math.random() * Math.PI * 2,
+      angularVelocity,
+      height,
+    });
+    nextSeedProjectileIdRef.current += 1;
+  };
 
   useEffect(() => {
     hasSeedBrokenRef.current = hasSeedBroken;
@@ -486,6 +599,10 @@ export function SunflowerCanvas({
   }, [onEnemyKilled]);
 
   useEffect(() => {
+    onSunflowerHeadClickRef.current = onSunflowerHeadClick;
+  }, [onSunflowerHeadClick]);
+
+  useEffect(() => {
     onHudUpdateRef.current = onHudUpdate;
   }, [onHudUpdate]);
 
@@ -524,12 +641,15 @@ export function SunflowerCanvas({
     let lastHudProgress = -1;
     let lastHudEmitTime = 0;
     let lastCloudUpdateTime = 0;
+    let lastEffectsUpdateTime = 0;
     const bees = beesRef.current;
     const pigeons = pigeonsRef.current;
     const caterpillars = caterpillarsRef.current;
     const ants = antsRef.current;
     const clouds = cloudsRef.current;
     const rainBursts = rainBurstsRef.current;
+    const seedProjectiles = seedProjectilesRef.current;
+    const particles = particlesRef.current;
 
     const beeSprite = new Image();
     const pigeonSprite = new Image();
@@ -921,6 +1041,7 @@ export function SunflowerCanvas({
     };
 
     const drawSeed = (canvasWidth: number, canvasHeight: number, timestamp: number) => {
+      sunflowerHeadHitboxRef.current = null;
       const seedHeight = Math.min(canvasHeight * 0.22, 178);
       const seedWidth = (seedHeight / SEED_HEIGHT) * SEED_WIDTH;
       const drawX = (canvasWidth - seedWidth) / 2;
@@ -958,6 +1079,7 @@ export function SunflowerCanvas({
       part: 'all' | 'soil' | 'sprout' = 'all',
     ) => {
       seedHitboxRef.current = null;
+      sunflowerHeadHitboxRef.current = null;
 
       const maxDrawWidth = Math.min(canvasWidth * 0.28, 280);
       const maxDrawHeight = canvasHeight * 0.34;
@@ -1035,6 +1157,12 @@ export function SunflowerCanvas({
       const frameColumns = health < 25 ? VERY_ANGRY_COLUMNS : COLUMNS;
       const isDamageFlashing = timestamp < damageFlashUntilRef.current;
 
+      sunflowerHeadHitboxRef.current = {
+        x: metrics.targetX,
+        y: metrics.targetY,
+        radius: metrics.targetRadius,
+      };
+
       drawSpriteFrame(
         sunflowerSprite,
         frame,
@@ -1057,6 +1185,7 @@ export function SunflowerCanvas({
       timestamp: number,
     ) => {
       seedHitboxRef.current = null;
+      sunflowerHeadHitboxRef.current = null;
       const metrics = getSunflowerMetrics(canvasWidth, canvasHeight, growthScale);
       const deathStartedAt = deathStartedAtRef.current ?? timestamp;
       const elapsed = Math.max(0, timestamp - deathStartedAt);
@@ -1202,6 +1331,79 @@ export function SunflowerCanvas({
         context.restore();
 
         return hitbox;
+      });
+    };
+
+    const updateEffects = (canvasWidth: number, canvasHeight: number, timestamp: number) => {
+      const elapsedSeconds =
+        lastEffectsUpdateTime === 0
+          ? 0
+          : Math.min(0.05, (timestamp - lastEffectsUpdateTime) / 1_000);
+      lastEffectsUpdateTime = timestamp;
+
+      for (let index = seedProjectiles.length - 1; index >= 0; index -= 1) {
+        const projectile = seedProjectiles[index];
+
+        projectile.x += projectile.vx * elapsedSeconds;
+        projectile.y += projectile.vy * elapsedSeconds;
+        projectile.vy += projectile.gravity * elapsedSeconds;
+        projectile.rotation += projectile.angularVelocity * elapsedSeconds;
+
+        if (
+          projectile.x < -projectile.height * 3 ||
+          projectile.x > canvasWidth + projectile.height * 3 ||
+          projectile.y < -canvasHeight * 0.65 ||
+          projectile.y > canvasHeight + projectile.height * 3
+        ) {
+          seedProjectiles.splice(index, 1);
+        }
+      }
+
+      for (let index = particles.length - 1; index >= 0; index -= 1) {
+        const particle = particles[index];
+
+        particle.x += particle.vx * elapsedSeconds;
+        particle.y += particle.vy * elapsedSeconds;
+        particle.vy += particle.gravity * elapsedSeconds;
+
+        if (timestamp - particle.startedAt >= particle.duration) {
+          particles.splice(index, 1);
+        }
+      }
+    };
+
+    const drawSeedProjectiles = () => {
+      seedProjectiles.forEach((projectile) => {
+        const drawHeight = projectile.height;
+        const drawWidth = drawHeight * (SEED_WIDTH / SEED_HEIGHT);
+
+        context.save();
+        context.translate(projectile.x, projectile.y);
+        context.rotate(projectile.rotation);
+        context.drawImage(
+          seedSprite,
+          -drawWidth / 2,
+          -drawHeight / 2,
+          drawWidth,
+          drawHeight,
+        );
+        context.restore();
+      });
+    };
+
+    const drawParticles = (timestamp: number) => {
+      particles.forEach((particle) => {
+        const progress = clamp((timestamp - particle.startedAt) / particle.duration, 0, 1);
+        const alpha = (1 - progress) * 0.86;
+        const radius = particle.radius * (1 - progress * 0.28);
+
+        context.save();
+        context.globalAlpha = alpha;
+        context.fillStyle = particle.color;
+        context.beginPath();
+        context.arc(particle.x, particle.y, radius, 0, Math.PI * 2);
+        context.fill();
+        context.restore();
       });
     };
 
@@ -1654,15 +1856,19 @@ export function SunflowerCanvas({
         pigeons.splice(0);
         caterpillars.splice(0);
         ants.splice(0);
+        seedProjectiles.splice(0);
+        particles.splice(0);
         beeHitboxesRef.current = [];
         pigeonHitboxesRef.current = [];
         caterpillarHitboxesRef.current = [];
         antHitboxesRef.current = [];
+        sunflowerHeadHitboxRef.current = null;
       } else {
         updateBees(canvasWidth, canvasHeight, timestamp, cycleState, lifecycle);
         updatePigeons(canvasWidth, canvasHeight, timestamp, lifecycle);
         updateCaterpillars(canvasWidth, canvasHeight, timestamp, lifecycle);
         updateAnts(canvasWidth, canvasHeight, timestamp);
+        updateEffects(canvasWidth, canvasHeight, timestamp);
       }
 
       context.clearRect(0, 0, canvasWidth, canvasHeight);
@@ -1692,6 +1898,8 @@ export function SunflowerCanvas({
       }
 
       drawBees(timestamp);
+      drawSeedProjectiles();
+      drawParticles(timestamp);
       drawCriticalHealthVignette(canvasWidth, canvasHeight);
       emitHud(timestamp, cycleState, lifecycle);
     };
@@ -1758,11 +1966,15 @@ export function SunflowerCanvas({
       ants.splice(0);
       clouds.splice(0);
       rainBursts.splice(0);
+      seedProjectiles.splice(0);
+      particles.splice(0);
       cloudHitboxesRef.current = [];
       beeHitboxesRef.current = [];
       pigeonHitboxesRef.current = [];
       caterpillarHitboxesRef.current = [];
       antHitboxesRef.current = [];
+      seedHitboxRef.current = null;
+      sunflowerHeadHitboxRef.current = null;
       window.cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', resizeCanvas);
       sprites.forEach((sprite) => sprite.removeEventListener('load', handleSpriteLoad));
@@ -1796,6 +2008,11 @@ export function SunflowerCanvas({
       if (clickedPigeonIndex >= 0) {
         pigeonsRef.current.splice(clickedPigeonIndex, 1);
         onEnemyKilledRef.current();
+        emitParticles(
+          clickedPigeon.x + clickedPigeon.width / 2,
+          clickedPigeon.y + clickedPigeon.height / 2,
+          'enemy',
+        );
       }
 
       pigeonHitboxesRef.current = pigeonHitboxesRef.current.filter(
@@ -1816,6 +2033,11 @@ export function SunflowerCanvas({
       if (clickedCaterpillarIndex >= 0) {
         caterpillarsRef.current.splice(clickedCaterpillarIndex, 1);
         onEnemyKilledRef.current();
+        emitParticles(
+          clickedCaterpillar.x + clickedCaterpillar.width / 2,
+          clickedCaterpillar.y + clickedCaterpillar.height / 2,
+          'enemy',
+        );
       }
 
       caterpillarHitboxesRef.current = caterpillarHitboxesRef.current.filter(
@@ -1834,6 +2056,11 @@ export function SunflowerCanvas({
       if (clickedAntIndex >= 0) {
         antsRef.current.splice(clickedAntIndex, 1);
         onEnemyKilledRef.current();
+        emitParticles(
+          clickedAnt.x + clickedAnt.width / 2,
+          clickedAnt.y + clickedAnt.height / 2,
+          'enemy',
+        );
       }
 
       antHitboxesRef.current = antHitboxesRef.current.filter((hitbox) => hitbox.id !== clickedAnt.id);
@@ -1887,6 +2114,20 @@ export function SunflowerCanvas({
 
         return;
       }
+    }
+
+    const sunflowerHeadHitbox = sunflowerHeadHitboxRef.current;
+
+    if (sunflowerHeadHitbox && pointIsInsideCircle(pointerX, pointerY, sunflowerHeadHitbox)) {
+      onSunflowerHeadClickRef.current();
+      launchSeedProjectile(
+        sunflowerHeadHitbox.x,
+        sunflowerHeadHitbox.y,
+        bounds.width,
+        bounds.height,
+      );
+      emitParticles(sunflowerHeadHitbox.x, sunflowerHeadHitbox.y, 'seed');
+      return;
     }
 
     if (hasSeedBroken || !seedHitbox) {

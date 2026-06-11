@@ -6,6 +6,7 @@ import { MAX_GROWTH_DAY, SunflowerCanvas, type HudInfo } from './components/Sunf
 import enemyHitSoundUrl from './assets/sounds/hit.wav';
 import enemyKillSoundUrl from './assets/sounds/squeeze.mp3';
 import backgroundMusicUrl from './assets/sounds/music.wav';
+import seedCrackSoundUrl from './assets/sounds/crack.wav';
 import plantDeathSoundUrl from './assets/sounds/scream.wav';
 
 const SEED_CLICKS_TO_SPROUT = 10;
@@ -34,6 +35,7 @@ const INITIAL_HUD: HudInfo = {
 
 function App() {
   const [seedClicks, setSeedClicks] = useState(0);
+  const [score, setScore] = useState(0);
   const [plantHealth, setPlantHealth] = useState(MAX_PLANT_HEALTH);
   const [hydration, setHydration] = useState<number | null>(null);
   const [hud, setHud] = useState<HudInfo>(INITIAL_HUD);
@@ -50,12 +52,16 @@ function App() {
   const enemyKillSoundsRef = useRef<HTMLAudioElement[]>([]);
   const enemyHitSoundsRef = useRef<HTMLAudioElement[]>([]);
   const plantDeathSoundsRef = useRef<HTMLAudioElement[]>([]);
+  const seedCrackSoundsRef = useRef<HTMLAudioElement[]>([]);
   const enemyKillSoundIndexRef = useRef(0);
   const enemyHitSoundIndexRef = useRef(0);
   const plantDeathSoundIndexRef = useRef(0);
+  const seedCrackSoundIndexRef = useRef(0);
   const backgroundMusicRef = useRef<HTMLAudioElement | null>(null);
   const hasStartedBackgroundMusicRef = useRef(false);
+  const plantHealthRef = useRef(MAX_PLANT_HEALTH);
   const previousPlantHealthRef = useRef(MAX_PLANT_HEALTH);
+  const isGameOverRef = useRef(false);
   const hasSeedBroken = seedClicks >= SEED_CLICKS_TO_SPROUT;
   const isGameOver = gameOverStats !== null;
 
@@ -66,6 +72,14 @@ function App() {
   useEffect(() => {
     hudRef.current = hud;
   }, [hud]);
+
+  useEffect(() => {
+    plantHealthRef.current = plantHealth;
+  }, [plantHealth]);
+
+  useEffect(() => {
+    isGameOverRef.current = isGameOver;
+  }, [isGameOver]);
 
   useEffect(() => {
     if (runStartRef.current === null) {
@@ -86,6 +100,7 @@ function App() {
     enemyKillSoundsRef.current = createSoundPool(enemyKillSoundUrl, 0.58);
     enemyHitSoundsRef.current = createSoundPool(enemyHitSoundUrl, 0.68);
     plantDeathSoundsRef.current = createSoundPool(plantDeathSoundUrl, 0.72);
+    seedCrackSoundsRef.current = createSoundPool(seedCrackSoundUrl, 0.7);
   }, []);
 
   useEffect(() => {
@@ -149,10 +164,32 @@ function App() {
     playSoundFromPool(plantDeathSoundsRef.current, plantDeathSoundIndexRef);
   };
 
+  const playSeedCrackSound = () => {
+    playSoundFromPool(seedCrackSoundsRef.current, seedCrackSoundIndexRef);
+  };
+
+  const stopBackgroundMusic = () => {
+    const music = backgroundMusicRef.current;
+
+    if (!music) {
+      return;
+    }
+
+    music.pause();
+    music.currentTime = 0;
+    hasStartedBackgroundMusicRef.current = false;
+  };
+
   const startBackgroundMusic = () => {
     const music = backgroundMusicRef.current;
 
-    if (!music || !soundEnabled || hasStartedBackgroundMusicRef.current) {
+    if (
+      !music ||
+      !soundEnabled ||
+      hasStartedBackgroundMusicRef.current ||
+      plantHealthRef.current <= 0 ||
+      isGameOverRef.current
+    ) {
       return;
     }
 
@@ -182,6 +219,7 @@ function App() {
       enemyKillSoundsRef.current,
       enemyHitSoundsRef.current,
       plantDeathSoundsRef.current,
+      seedCrackSoundsRef.current,
     ];
 
     audioPools.forEach((pool) => {
@@ -212,6 +250,7 @@ function App() {
 
   useEffect(() => {
     if (plantHealth <= 0 && previousPlantHealthRef.current > 0) {
+      stopBackgroundMusic();
       playPlantDeathSound();
     }
 
@@ -286,6 +325,7 @@ function App() {
 
   const handleSeedClick = () => {
     startBackgroundMusic();
+    playSeedCrackSound();
     setSeedClicks((currentClicks) => Math.min(currentClicks + 1, SEED_CLICKS_TO_SPROUT));
   };
 
@@ -306,6 +346,11 @@ function App() {
       hydrationRef.current = nextHydration;
       return nextHydration;
     });
+  };
+
+  const handleSunflowerHeadClick = () => {
+    startBackgroundMusic();
+    setScore((currentScore) => currentScore + 1);
   };
 
   const handlePigeonAttack = () => {
@@ -334,8 +379,11 @@ function App() {
     antAttacksRef.current = 0;
     caterpillarAttacksRef.current = 0;
     previousPlantHealthRef.current = MAX_PLANT_HEALTH;
+    plantHealthRef.current = MAX_PLANT_HEALTH;
+    isGameOverRef.current = false;
     hudRef.current = INITIAL_HUD;
     setSeedClicks(0);
+    setScore(0);
     setPlantHealth(MAX_PLANT_HEALTH);
     setHydration(null);
     setHud(INITIAL_HUD);
@@ -382,6 +430,7 @@ function App() {
         onAntAttack={handleAntAttack}
         onCaterpillarAttack={handleCaterpillarAttack}
         onEnemyKilled={playEnemyKillSound}
+        onSunflowerHeadClick={handleSunflowerHeadClick}
         onHudUpdate={setHud}
       />
       <GameHud
@@ -394,6 +443,7 @@ function App() {
         maxPlantHealth={MAX_PLANT_HEALTH}
         hydration={hydration}
         maxHydration={MAX_HYDRATION}
+        score={score}
         seedClicks={seedClicks}
         seedClicksToSprout={SEED_CLICKS_TO_SPROUT}
       />

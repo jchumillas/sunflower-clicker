@@ -1,19 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
+import type { MutableRefObject } from 'react';
 import { GameHud } from './components/GameHud';
 import { GameOverModal, type GameOverStats } from './components/GameOverModal';
 import { MAX_GROWTH_DAY, SunflowerCanvas, type HudInfo } from './components/SunflowerCanvas';
+import enemyHitSoundUrl from './assets/sounds/hit.wav';
+import enemyKillSoundUrl from './assets/sounds/squeeze.mp3';
+import backgroundMusicUrl from './assets/sounds/music.wav';
+import plantDeathSoundUrl from './assets/sounds/scream.wav';
 
 const SEED_CLICKS_TO_SPROUT = 10;
 const MAX_PLANT_HEALTH = 100;
 const MAX_HYDRATION = 100;
 const INITIAL_HYDRATION = 50;
-const HYDRATION_DECAY_PER_SECOND = 5;
+const HYDRATION_DECAY_PER_SECOND = 2;
 const DRY_HEALTH_DAMAGE_PER_SECOND = 2;
-const RAIN_HYDRATION_GAIN = 2;
+const RAIN_HYDRATION_GAIN = 4;
 const PIGEON_ATTACK_DAMAGE = 10;
 const ANT_ATTACK_DAMAGE = 2;
 const CATERPILLAR_ATTACK_DAMAGE = 5;
 const GAME_OVER_MODAL_DELAY_MS = 900;
+const SOUND_POOL_SIZE = 4;
+const BACKGROUND_MUSIC_VOLUME = 0.28;
 
 const INITIAL_HUD: HudInfo = {
   day: 1,
@@ -36,6 +43,15 @@ function App() {
   const pigeonAttacksRef = useRef(0);
   const antAttacksRef = useRef(0);
   const caterpillarAttacksRef = useRef(0);
+  const enemyKillSoundsRef = useRef<HTMLAudioElement[]>([]);
+  const enemyHitSoundsRef = useRef<HTMLAudioElement[]>([]);
+  const plantDeathSoundsRef = useRef<HTMLAudioElement[]>([]);
+  const enemyKillSoundIndexRef = useRef(0);
+  const enemyHitSoundIndexRef = useRef(0);
+  const plantDeathSoundIndexRef = useRef(0);
+  const backgroundMusicRef = useRef<HTMLAudioElement | null>(null);
+  const hasStartedBackgroundMusicRef = useRef(false);
+  const previousPlantHealthRef = useRef(MAX_PLANT_HEALTH);
   const hasSeedBroken = seedClicks >= SEED_CLICKS_TO_SPROUT;
   const isGameOver = gameOverStats !== null;
 
@@ -52,6 +68,100 @@ function App() {
       runStartRef.current = performance.now();
     }
   }, [runId]);
+
+  useEffect(() => {
+    const createSoundPool = (url: string, volume: number) =>
+      Array.from({ length: SOUND_POOL_SIZE }, () => {
+        const audio = new Audio(url);
+
+        audio.preload = 'auto';
+        audio.volume = volume;
+        return audio;
+      });
+
+    enemyKillSoundsRef.current = createSoundPool(enemyKillSoundUrl, 0.58);
+    enemyHitSoundsRef.current = createSoundPool(enemyHitSoundUrl, 0.68);
+    plantDeathSoundsRef.current = createSoundPool(plantDeathSoundUrl, 0.72);
+  }, []);
+
+  useEffect(() => {
+    const music = new Audio(backgroundMusicUrl);
+
+    music.loop = true;
+    music.preload = 'auto';
+    music.volume = BACKGROUND_MUSIC_VOLUME;
+    backgroundMusicRef.current = music;
+
+    return () => {
+      music.pause();
+      backgroundMusicRef.current = null;
+      hasStartedBackgroundMusicRef.current = false;
+    };
+  }, []);
+
+  const playSoundFromPool = (
+    pool: HTMLAudioElement[],
+    indexRef: MutableRefObject<number>,
+  ) => {
+    if (pool.length === 0) {
+      return;
+    }
+
+    const sound = pool[indexRef.current % pool.length];
+
+    indexRef.current += 1;
+    sound.currentTime = 0;
+    void sound.play().catch(() => {
+      // Browsers can block sound until the first user gesture.
+    });
+  };
+
+  const playEnemyKillSound = () => {
+    playSoundFromPool(enemyKillSoundsRef.current, enemyKillSoundIndexRef);
+  };
+
+  const playEnemyHitSound = () => {
+    playSoundFromPool(enemyHitSoundsRef.current, enemyHitSoundIndexRef);
+  };
+
+  const playPlantDeathSound = () => {
+    playSoundFromPool(plantDeathSoundsRef.current, plantDeathSoundIndexRef);
+  };
+
+  const startBackgroundMusic = () => {
+    const music = backgroundMusicRef.current;
+
+    if (!music || hasStartedBackgroundMusicRef.current) {
+      return;
+    }
+
+    hasStartedBackgroundMusicRef.current = true;
+    void music.play().catch(() => {
+      hasStartedBackgroundMusicRef.current = false;
+    });
+  };
+
+  useEffect(() => {
+    const handleFirstInteraction = () => {
+      startBackgroundMusic();
+    };
+
+    window.addEventListener('pointerdown', handleFirstInteraction);
+    window.addEventListener('keydown', handleFirstInteraction);
+
+    return () => {
+      window.removeEventListener('pointerdown', handleFirstInteraction);
+      window.removeEventListener('keydown', handleFirstInteraction);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (plantHealth <= 0 && previousPlantHealthRef.current > 0) {
+      playPlantDeathSound();
+    }
+
+    previousPlantHealthRef.current = plantHealth;
+  }, [plantHealth]);
 
   useEffect(() => {
     if (isGameOver || plantHealth > 0) {
@@ -120,6 +230,7 @@ function App() {
   }, [hasSeedBroken, isGameOver, plantHealth]);
 
   const handleSeedClick = () => {
+    startBackgroundMusic();
     setSeedClicks((currentClicks) => Math.min(currentClicks + 1, SEED_CLICKS_TO_SPROUT));
   };
 
@@ -129,6 +240,7 @@ function App() {
   };
 
   const handleRainCloudClick = () => {
+    startBackgroundMusic();
     setHydration((currentHydration) => {
       if (currentHydration === null) {
         return currentHydration;
@@ -143,16 +255,19 @@ function App() {
 
   const handlePigeonAttack = () => {
     pigeonAttacksRef.current += 1;
+    playEnemyHitSound();
     setPlantHealth((currentHealth) => Math.max(0, currentHealth - PIGEON_ATTACK_DAMAGE));
   };
 
   const handleAntAttack = () => {
     antAttacksRef.current += 1;
+    playEnemyHitSound();
     setPlantHealth((currentHealth) => Math.max(0, currentHealth - ANT_ATTACK_DAMAGE));
   };
 
   const handleCaterpillarAttack = () => {
     caterpillarAttacksRef.current += 1;
+    playEnemyHitSound();
     setPlantHealth((currentHealth) => Math.max(0, currentHealth - CATERPILLAR_ATTACK_DAMAGE));
   };
 
@@ -163,6 +278,7 @@ function App() {
     pigeonAttacksRef.current = 0;
     antAttacksRef.current = 0;
     caterpillarAttacksRef.current = 0;
+    previousPlantHealthRef.current = MAX_PLANT_HEALTH;
     hudRef.current = INITIAL_HUD;
     setSeedClicks(0);
     setPlantHealth(MAX_PLANT_HEALTH);
@@ -184,6 +300,7 @@ function App() {
         onPigeonAttack={handlePigeonAttack}
         onAntAttack={handleAntAttack}
         onCaterpillarAttack={handleCaterpillarAttack}
+        onEnemyKilled={playEnemyKillSound}
         onHudUpdate={setHud}
       />
       <GameHud

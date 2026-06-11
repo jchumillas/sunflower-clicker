@@ -117,6 +117,7 @@ type SunflowerCanvasProps = {
   onPigeonAttack: () => void;
   onAntAttack: () => void;
   onCaterpillarAttack: () => void;
+  onEnemyKilled: () => void;
   onHudUpdate: (hud: HudInfo) => void;
 };
 
@@ -401,6 +402,7 @@ export function SunflowerCanvas({
   onPigeonAttack,
   onAntAttack,
   onCaterpillarAttack,
+  onEnemyKilled,
   onHudUpdate,
 }: SunflowerCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -428,6 +430,7 @@ export function SunflowerCanvas({
   const onPigeonAttackRef = useRef(onPigeonAttack);
   const onAntAttackRef = useRef(onAntAttack);
   const onCaterpillarAttackRef = useRef(onCaterpillarAttack);
+  const onEnemyKilledRef = useRef(onEnemyKilled);
   const onHudUpdateRef = useRef(onHudUpdate);
 
   useEffect(() => {
@@ -476,6 +479,10 @@ export function SunflowerCanvas({
   useEffect(() => {
     onCaterpillarAttackRef.current = onCaterpillarAttack;
   }, [onCaterpillarAttack]);
+
+  useEffect(() => {
+    onEnemyKilledRef.current = onEnemyKilled;
+  }, [onEnemyKilled]);
 
   useEffect(() => {
     onHudUpdateRef.current = onHudUpdate;
@@ -1494,13 +1501,16 @@ export function SunflowerCanvas({
       });
     };
 
-    const drawLayeredBackgroundAndEnemies = (
-      canvasWidth: number,
-      canvasHeight: number,
-      timestamp: number,
-    ) => {
-      const drawables: SceneDrawable[] = [];
+    const drawBackgroundSunflowers = (canvasWidth: number, canvasHeight: number) => {
       const sceneScale = getBackgroundSceneScale(canvasWidth, canvasHeight);
+
+      BACKGROUND_FLOWERS.filter(shouldDrawBackgroundFlower).forEach((flower) => {
+        drawBackgroundSunflower(flower, canvasWidth, canvasHeight, sceneScale);
+      });
+    };
+
+    const drawEnemies = (timestamp: number) => {
+      const drawables: SceneDrawable[] = [];
       let order = 0;
       const getOrder = () => {
         const currentOrder = order;
@@ -1508,14 +1518,6 @@ export function SunflowerCanvas({
         order += 1;
         return currentOrder;
       };
-
-      BACKGROUND_FLOWERS.filter(shouldDrawBackgroundFlower).forEach((flower) => {
-        drawables.push({
-          depthY: canvasHeight * flower.bottom,
-          order: getOrder(),
-          draw: () => drawBackgroundSunflower(flower, canvasWidth, canvasHeight, sceneScale),
-        });
-      });
 
       queueCaterpillars(drawables, getOrder, timestamp);
       queueAnts(drawables, getOrder, timestamp);
@@ -1612,7 +1614,7 @@ export function SunflowerCanvas({
       drawField(canvasWidth, canvasHeight);
       drawGroundShadow(canvasWidth, canvasHeight);
       drawRainBursts(canvasWidth, canvasHeight, timestamp);
-      drawLayeredBackgroundAndEnemies(canvasWidth, canvasHeight, timestamp);
+      drawBackgroundSunflowers(canvasWidth, canvasHeight);
 
       if (isPlantDead) {
         const deathGrowthScale = lifecycle.stage === 'sunflower' ? lifecycle.growthScale : 0.42;
@@ -1626,6 +1628,7 @@ export function SunflowerCanvas({
         drawMainSunflower(canvasWidth, canvasHeight, lifecycle.growthScale, timestamp);
       }
 
+      drawEnemies(timestamp);
       drawBees(timestamp);
       emitHud(timestamp, cycleState, lifecycle);
     };
@@ -1729,6 +1732,7 @@ export function SunflowerCanvas({
 
       if (clickedPigeonIndex >= 0) {
         pigeonsRef.current.splice(clickedPigeonIndex, 1);
+        onEnemyKilledRef.current();
       }
 
       pigeonHitboxesRef.current = pigeonHitboxesRef.current.filter(
@@ -1748,6 +1752,7 @@ export function SunflowerCanvas({
 
       if (clickedCaterpillarIndex >= 0) {
         caterpillarsRef.current.splice(clickedCaterpillarIndex, 1);
+        onEnemyKilledRef.current();
       }
 
       caterpillarHitboxesRef.current = caterpillarHitboxesRef.current.filter(
@@ -1765,6 +1770,7 @@ export function SunflowerCanvas({
 
       if (clickedAntIndex >= 0) {
         antsRef.current.splice(clickedAntIndex, 1);
+        onEnemyKilledRef.current();
       }
 
       antHitboxesRef.current = antHitboxesRef.current.filter((hitbox) => hitbox.id !== clickedAnt.id);

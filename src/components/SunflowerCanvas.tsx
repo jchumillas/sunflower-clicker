@@ -7,11 +7,13 @@ import cloud03Url from '../assets/cloud/cloud_03.png';
 import cloud04Url from '../assets/cloud/cloud_04.png';
 import cloud05Url from '../assets/cloud/cloud_05.png';
 import moonSpriteUrl from '../assets/moon/moon.png';
+import pigeonSpriteUrl from '../assets/pidgeon/fly.png';
 import seedSpriteUrl from '../assets/seed.png';
 import soilSpriteUrl from '../assets/soil.png';
 import sproutSpriteUrl from '../assets/sprout.png';
 import sunCrownUrl from '../assets/sun/crown.png';
 import sunFaceUrl from '../assets/sun/face.png';
+import angrySunflowerSpriteUrl from '../assets/idle_angry.png';
 import sunflowerSpriteUrl from '../assets/idle_happy.png';
 import backgroundSunflowerSpriteUrl from '../assets/sunflower_background.png';
 
@@ -34,6 +36,19 @@ const BEE_FRAME_COUNT = 2;
 const BEE_FRAME_DURATION_MS = 50;
 const BEE_MIN_SPAWN_DELAY_MS = 5_000;
 const BEE_MAX_SPAWN_DELAY_MS = 10_000;
+const PIGEON_COLUMNS = 4;
+const PIGEON_ROWS = 4;
+const PIGEON_FRAME_COUNT = PIGEON_COLUMNS * PIGEON_ROWS;
+const PIGEON_FRAME_WIDTH = 500;
+const PIGEON_FRAME_HEIGHT = 404;
+const PIGEON_FRAME_DURATION_MS = 50;
+const PIGEON_MIN_SPAWN_DELAY_MS = 3_000;
+const PIGEON_MAX_SPAWN_DELAY_MS = 5_000;
+const RAIN_CLOUD_CHANCE = 0.1;
+const RAIN_BURST_DURATION_MS = 1_200;
+const RAIN_STREAK_COUNT = 42;
+const RAIN_HYDRATION_MIN_SCREEN_PERCENT = 0.3;
+const RAIN_HYDRATION_MAX_SCREEN_PERCENT = 0.7;
 const CLOUD_ASPECT_RATIOS = [
   886 / 264,
   481 / 383,
@@ -61,8 +76,11 @@ export type HudInfo = {
 
 type SunflowerCanvasProps = {
   hasSeedBroken: boolean;
+  plantHealth: number;
   onSeedClick: () => void;
   onBeePollinate: () => void;
+  onRainCloudClick: () => void;
+  onPigeonAttack: () => void;
   onHudUpdate: (hud: HudInfo) => void;
 };
 
@@ -112,6 +130,16 @@ type Bee = {
   side: -1 | 1;
 };
 
+type Pigeon = {
+  id: number;
+  x: number;
+  y: number;
+  speed: number;
+  size: number;
+  wobble: number;
+  side: -1 | 1;
+};
+
 type Cloud = {
   imageIndex: number;
   startX: number;
@@ -119,6 +147,19 @@ type Cloud = {
   width: number;
   speed: number;
   opacity: number;
+};
+
+type CloudInstance = Cloud & {
+  id: number;
+  x: number;
+  isRainCloud: boolean;
+  seed: number;
+};
+
+type RainBurst = {
+  cloudId: number;
+  startedAt: number;
+  seed: number;
 };
 
 type BackgroundFlower = {
@@ -213,6 +254,15 @@ const colorToCss = (color: Rgb) => `rgb(${color.r}, ${color.g}, ${color.b})`;
 const getRandomBeeSpawnDelay = () =>
   BEE_MIN_SPAWN_DELAY_MS + Math.random() * (BEE_MAX_SPAWN_DELAY_MS - BEE_MIN_SPAWN_DELAY_MS);
 
+const getRandomPigeonSpawnDelay = () =>
+  PIGEON_MIN_SPAWN_DELAY_MS + Math.random() * (PIGEON_MAX_SPAWN_DELAY_MS - PIGEON_MIN_SPAWN_DELAY_MS);
+
+const getSeededNoise = (seed: number, index: number) => {
+  const value = Math.sin(seed * 41.37 + index * 12.9898) * 43_758.5453;
+
+  return value - Math.floor(value);
+};
+
 const getCycleState = (timestamp: number, cycleStart: number): CycleState => {
   const cycleElapsed = (timestamp - cycleStart) % TOTAL_CYCLE_MS;
 
@@ -274,18 +324,29 @@ const getSkyColors = ({ isDay, progress }: CycleState) => {
 
 export function SunflowerCanvas({
   hasSeedBroken,
+  plantHealth,
   onSeedClick,
   onBeePollinate,
+  onRainCloudClick,
+  onPigeonAttack,
   onHudUpdate,
 }: SunflowerCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const seedHitboxRef = useRef<Rect | null>(null);
+  const cloudsRef = useRef<CloudInstance[]>([]);
+  const cloudHitboxesRef = useRef<Array<Rect & { id: number }>>([]);
+  const rainBurstsRef = useRef<RainBurst[]>([]);
   const beesRef = useRef<Bee[]>([]);
   const beeHitboxesRef = useRef<Array<Rect & { id: number }>>([]);
+  const pigeonsRef = useRef<Pigeon[]>([]);
+  const pigeonHitboxesRef = useRef<Array<Rect & { id: number }>>([]);
   const hasSeedBrokenRef = useRef(hasSeedBroken);
+  const plantHealthRef = useRef(plantHealth);
   const seedBrokenAtRef = useRef<number | null>(null);
   const onSeedClickRef = useRef(onSeedClick);
   const onBeePollinateRef = useRef(onBeePollinate);
+  const onRainCloudClickRef = useRef(onRainCloudClick);
+  const onPigeonAttackRef = useRef(onPigeonAttack);
   const onHudUpdateRef = useRef(onHudUpdate);
 
   useEffect(() => {
@@ -297,12 +358,24 @@ export function SunflowerCanvas({
   }, [hasSeedBroken]);
 
   useEffect(() => {
+    plantHealthRef.current = plantHealth;
+  }, [plantHealth]);
+
+  useEffect(() => {
     onSeedClickRef.current = onSeedClick;
   }, [onSeedClick]);
 
   useEffect(() => {
     onBeePollinateRef.current = onBeePollinate;
   }, [onBeePollinate]);
+
+  useEffect(() => {
+    onRainCloudClickRef.current = onRainCloudClick;
+  }, [onRainCloudClick]);
+
+  useEffect(() => {
+    onPigeonAttackRef.current = onPigeonAttack;
+  }, [onPigeonAttack]);
 
   useEffect(() => {
     onHudUpdateRef.current = onHudUpdate;
@@ -330,12 +403,20 @@ export function SunflowerCanvas({
     let lastBeeUpdateTime = 0;
     let nextBeeSpawnAt = Number.POSITIVE_INFINITY;
     let nextBeeId = 1;
+    let lastPigeonUpdateTime = 0;
+    let nextPigeonSpawnAt = Number.POSITIVE_INFINITY;
+    let nextPigeonId = 1;
     let lastHudKey = '';
     let lastHudProgress = -1;
     let lastHudEmitTime = 0;
+    let lastCloudUpdateTime = 0;
     const bees = beesRef.current;
+    const pigeons = pigeonsRef.current;
+    const clouds = cloudsRef.current;
+    const rainBursts = rainBurstsRef.current;
 
     const beeSprite = new Image();
+    const pigeonSprite = new Image();
     const cloudSprites = [
       new Image(),
       new Image(),
@@ -344,6 +425,7 @@ export function SunflowerCanvas({
       new Image(),
     ];
     const mainSunflowerSprite = new Image();
+    const angrySunflowerSprite = new Image();
     const backgroundSunflowerSprite = new Image();
     const seedSprite = new Image();
     const soilSprite = new Image();
@@ -353,8 +435,10 @@ export function SunflowerCanvas({
     const sunCrownSprite = new Image();
     const sprites = [
       beeSprite,
+      pigeonSprite,
       ...cloudSprites,
       mainSunflowerSprite,
+      angrySunflowerSprite,
       backgroundSunflowerSprite,
       seedSprite,
       soilSprite,
@@ -389,24 +473,133 @@ export function SunflowerCanvas({
       context.fillRect(0, 0, canvasWidth, canvasHeight);
     };
 
-    const drawClouds = (canvasWidth: number, canvasHeight: number, timestamp: number, cycleState: CycleState) => {
+    const getCloudWidth = (cloud: Cloud, canvasWidth: number) => Math.max(90, canvasWidth * cloud.width);
+
+    const randomizeCloud = (cloud: CloudInstance) => {
+      cloud.isRainCloud = Math.random() < RAIN_CLOUD_CHANCE;
+      cloud.seed = Math.random() * 10_000;
+    };
+
+    const recycleCloud = (cloud: CloudInstance, canvasWidth: number) => {
+      const width = getCloudWidth(cloud, canvasWidth);
+
+      cloud.x = -width - Math.random() * canvasWidth * 0.18;
+      for (let index = rainBursts.length - 1; index >= 0; index -= 1) {
+        if (rainBursts[index].cloudId === cloud.id) {
+          rainBursts.splice(index, 1);
+        }
+      }
+      randomizeCloud(cloud);
+    };
+
+    const ensureClouds = (canvasWidth: number) => {
+      if (clouds.length > 0) {
+        return;
+      }
+
+      CLOUDS.forEach((cloud, index) => {
+        const cloudInstance: CloudInstance = {
+          ...cloud,
+          id: index + 1,
+          x: canvasWidth * cloud.startX,
+          isRainCloud: false,
+          seed: 0,
+        };
+
+        randomizeCloud(cloudInstance);
+        clouds.push(cloudInstance);
+      });
+    };
+
+    const updateClouds = (canvasWidth: number, timestamp: number) => {
+      ensureClouds(canvasWidth);
+
+      const elapsedSeconds = lastCloudUpdateTime === 0 ? 0 : (timestamp - lastCloudUpdateTime) / 1_000;
+      lastCloudUpdateTime = timestamp;
+
+      clouds.forEach((cloud) => {
+        const width = getCloudWidth(cloud, canvasWidth);
+
+        cloud.x += cloud.speed * elapsedSeconds;
+
+        if (cloud.x > canvasWidth + width) {
+          recycleCloud(cloud, canvasWidth);
+        }
+      });
+    };
+
+    const drawClouds = (canvasWidth: number, canvasHeight: number, cycleState: CycleState) => {
       const nightOpacity = cycleState.isDay ? 1 : 0.28;
 
-      CLOUDS.forEach((cloud) => {
+      cloudHitboxesRef.current = [];
+
+      clouds.forEach((cloud) => {
         const sprite = cloudSprites[cloud.imageIndex];
-        const width = Math.max(90, canvasWidth * cloud.width);
+        const width = getCloudWidth(cloud, canvasWidth);
         const height = width / CLOUD_ASPECT_RATIOS[cloud.imageIndex];
-        const travelWidth = canvasWidth + width * 2;
-        const travelX = (canvasWidth * cloud.startX + (timestamp / 1_000) * cloud.speed) % travelWidth;
-        const x = travelX - width;
         const y = canvasHeight * cloud.y;
 
         context.save();
         context.globalAlpha = cloud.opacity * nightOpacity;
-        context.drawImage(sprite, x, y, width, height);
-        context.drawImage(sprite, x - travelWidth, y, width, height);
+        context.filter = cloud.isRainCloud ? 'grayscale(0.92) brightness(0.72) contrast(1.12)' : 'none';
+        context.drawImage(sprite, cloud.x, y, width, height);
         context.restore();
+
+        if (cloud.isRainCloud) {
+          cloudHitboxesRef.current.push({
+            id: cloud.id,
+            x: cloud.x,
+            y,
+            width,
+            height,
+          });
+        }
       });
+    };
+
+    const drawRainBursts = (canvasWidth: number, canvasHeight: number, timestamp: number) => {
+      for (let index = rainBursts.length - 1; index >= 0; index -= 1) {
+        const burst = rainBursts[index];
+        const age = timestamp - burst.startedAt;
+
+        if (age > RAIN_BURST_DURATION_MS) {
+          rainBursts.splice(index, 1);
+          continue;
+        }
+
+        const cloud = clouds.find((candidate) => candidate.id === burst.cloudId);
+
+        if (!cloud) {
+          rainBursts.splice(index, 1);
+          continue;
+        }
+
+        const width = getCloudWidth(cloud, canvasWidth);
+        const height = width / CLOUD_ASPECT_RATIOS[cloud.imageIndex];
+        const cloudY = canvasHeight * cloud.y;
+        const progress = age / RAIN_BURST_DURATION_MS;
+        const rainTop = cloudY + height * 0.64;
+        const rainDepth = canvasHeight * 0.58;
+
+        context.save();
+        context.strokeStyle = `rgba(115, 185, 235, ${0.58 * (1 - progress * 0.45)})`;
+        context.lineWidth = 2;
+        context.lineCap = 'round';
+
+        for (let dropIndex = 0; dropIndex < RAIN_STREAK_COUNT; dropIndex += 1) {
+          const offsetX = getSeededNoise(burst.seed, dropIndex) * width * 0.82 + width * 0.09;
+          const fallOffset = (timestamp / 7 + getSeededNoise(burst.seed, dropIndex + 100) * rainDepth) % rainDepth;
+          const x = cloud.x + offsetX;
+          const y = rainTop + fallOffset;
+
+          context.beginPath();
+          context.moveTo(x, y);
+          context.lineTo(x - 5, y + 18);
+          context.stroke();
+        }
+
+        context.restore();
+      }
     };
 
     const drawCelestialPath = (
@@ -633,9 +826,10 @@ export function SunflowerCanvas({
     const drawMainSunflower = (canvasWidth: number, canvasHeight: number, growthScale: number) => {
       seedHitboxRef.current = null;
       const metrics = getSunflowerMetrics(canvasWidth, canvasHeight, growthScale);
+      const sunflowerSprite = plantHealthRef.current < 50 ? angrySunflowerSprite : mainSunflowerSprite;
 
       drawSpriteFrame(
-        mainSunflowerSprite,
+        sunflowerSprite,
         currentFrame,
         MAIN_FRAME_WIDTH,
         MAIN_FRAME_HEIGHT,
@@ -644,6 +838,24 @@ export function SunflowerCanvas({
         metrics.bottomY,
         metrics.scale,
       );
+    };
+
+    const getPlantTarget = (canvasWidth: number, canvasHeight: number, lifecycle: PlantLifecycle) => {
+      if (lifecycle.stage === 'sunflower') {
+        const sunflowerMetrics = getSunflowerMetrics(canvasWidth, canvasHeight, lifecycle.growthScale);
+
+        return {
+          x: sunflowerMetrics.targetX,
+          y: sunflowerMetrics.targetY,
+          radius: sunflowerMetrics.targetRadius,
+        };
+      }
+
+      return {
+        x: canvasWidth / 2,
+        y: canvasHeight * 0.77,
+        radius: Math.max(24, Math.min(canvasWidth, canvasHeight) * 0.05),
+      };
     };
 
     const spawnBee = (canvasWidth: number, canvasHeight: number, targetY: number) => {
@@ -755,6 +967,118 @@ export function SunflowerCanvas({
       });
     };
 
+    const spawnPigeon = (canvasWidth: number, canvasHeight: number, targetY: number) => {
+      const side: -1 | 1 = Math.random() < 0.5 ? -1 : 1;
+      const size = Math.min(Math.max(canvasWidth * 0.12, 88), 150);
+      const x = side === -1 ? -size : canvasWidth + size;
+      const y = clamp(
+        targetY + (Math.random() - 0.5) * canvasHeight * 0.44,
+        canvasHeight * 0.14,
+        canvasHeight * 0.82,
+      );
+
+      pigeons.push({
+        id: nextPigeonId,
+        x,
+        y,
+        speed: 82 + Math.random() * 48,
+        size,
+        wobble: Math.random() * Math.PI * 2,
+        side,
+      });
+      nextPigeonId += 1;
+    };
+
+    const updatePigeons = (
+      canvasWidth: number,
+      canvasHeight: number,
+      timestamp: number,
+      lifecycle: PlantLifecycle,
+    ) => {
+      const elapsedSeconds =
+        lastPigeonUpdateTime === 0 ? 0 : (timestamp - lastPigeonUpdateTime) / 1_000;
+      lastPigeonUpdateTime = timestamp;
+
+      if (lifecycle.stage === 'seed') {
+        pigeons.splice(0);
+        nextPigeonSpawnAt = Number.POSITIVE_INFINITY;
+        return;
+      }
+
+      const target = getPlantTarget(canvasWidth, canvasHeight, lifecycle);
+
+      if (!Number.isFinite(nextPigeonSpawnAt)) {
+        nextPigeonSpawnAt = timestamp + getRandomPigeonSpawnDelay();
+      }
+
+      if (timestamp >= nextPigeonSpawnAt) {
+        spawnPigeon(canvasWidth, canvasHeight, target.y);
+        nextPigeonSpawnAt = timestamp + getRandomPigeonSpawnDelay();
+      }
+
+      for (let index = pigeons.length - 1; index >= 0; index -= 1) {
+        const pigeon = pigeons[index];
+        const dx = target.x - pigeon.x;
+        const dy = target.y - pigeon.y;
+        const distance = Math.hypot(dx, dy);
+
+        if (distance <= target.radius + pigeon.size * 0.18) {
+          pigeons.splice(index, 1);
+          onPigeonAttackRef.current();
+          continue;
+        }
+
+        if (distance > 0) {
+          pigeon.x += (dx / distance) * pigeon.speed * elapsedSeconds;
+          pigeon.y += (dy / distance) * pigeon.speed * elapsedSeconds;
+        }
+      }
+    };
+
+    const drawPigeons = (timestamp: number) => {
+      const pigeonFrame = Math.floor(timestamp / PIGEON_FRAME_DURATION_MS) % PIGEON_FRAME_COUNT;
+
+      pigeonHitboxesRef.current = pigeons.map((pigeon) => {
+        const column = pigeonFrame % PIGEON_COLUMNS;
+        const row = Math.floor(pigeonFrame / PIGEON_COLUMNS);
+        const hoverY = Math.sin(timestamp / 260 + pigeon.wobble) * 10;
+        const drawWidth = pigeon.size;
+        const drawHeight = pigeon.size * (PIGEON_FRAME_HEIGHT / PIGEON_FRAME_WIDTH);
+        const drawX = pigeon.x - drawWidth / 2;
+        const drawY = pigeon.y + hoverY - drawHeight / 2;
+        const shouldFlip = pigeon.side === -1;
+        const hitbox = {
+          id: pigeon.id,
+          x: drawX,
+          y: drawY,
+          width: drawWidth,
+          height: drawHeight,
+        };
+
+        context.save();
+        context.translate(pigeon.x, pigeon.y + hoverY);
+
+        if (shouldFlip) {
+          context.scale(-1, 1);
+        }
+
+        context.drawImage(
+          pigeonSprite,
+          column * PIGEON_FRAME_WIDTH,
+          row * PIGEON_FRAME_HEIGHT,
+          PIGEON_FRAME_WIDTH,
+          PIGEON_FRAME_HEIGHT,
+          -drawWidth / 2,
+          -drawHeight / 2,
+          drawWidth,
+          drawHeight,
+        );
+        context.restore();
+
+        return hitbox;
+      });
+    };
+
     const getPlantLifecycle = (timestamp: number): PlantLifecycle => {
       if (!hasSeedBrokenRef.current || seedBrokenAtRef.current === null) {
         return {
@@ -815,15 +1139,18 @@ export function SunflowerCanvas({
       const cycleState = getCycleState(timestamp, cycleStart);
       const lifecycle = getPlantLifecycle(timestamp);
 
+      updateClouds(canvasWidth, timestamp);
       updateBees(canvasWidth, canvasHeight, timestamp, cycleState, lifecycle);
+      updatePigeons(canvasWidth, canvasHeight, timestamp, lifecycle);
 
       context.clearRect(0, 0, canvasWidth, canvasHeight);
       drawSky(canvasWidth, canvasHeight, cycleState);
-      drawClouds(canvasWidth, canvasHeight, timestamp, cycleState);
+      drawClouds(canvasWidth, canvasHeight, cycleState);
       drawCelestialPath(canvasWidth, canvasHeight, cycleState, timestamp);
       drawField(canvasWidth, canvasHeight);
       drawBackgroundSunflowers(canvasWidth, canvasHeight);
       drawGroundShadow(canvasWidth, canvasHeight);
+      drawRainBursts(canvasWidth, canvasHeight, timestamp);
 
       if (lifecycle.stage === 'seed') {
         drawSeed(canvasWidth, canvasHeight, timestamp);
@@ -834,6 +1161,7 @@ export function SunflowerCanvas({
       }
 
       drawBees(timestamp);
+      drawPigeons(timestamp);
       emitHud(timestamp, cycleState, lifecycle);
     };
 
@@ -870,7 +1198,9 @@ export function SunflowerCanvas({
     window.addEventListener('resize', resizeCanvas);
     sprites.forEach((sprite) => sprite.addEventListener('load', handleSpriteLoad));
     mainSunflowerSprite.src = sunflowerSpriteUrl;
+    angrySunflowerSprite.src = angrySunflowerSpriteUrl;
     beeSprite.src = beeSpriteUrl;
+    pigeonSprite.src = pigeonSpriteUrl;
     cloudSprites[0].src = cloud01Url;
     cloudSprites[1].src = cloud02Url;
     cloudSprites[2].src = cloud03Url;
@@ -887,6 +1217,12 @@ export function SunflowerCanvas({
     return () => {
       isMounted = false;
       bees.splice(0);
+      pigeons.splice(0);
+      clouds.splice(0);
+      rainBursts.splice(0);
+      cloudHitboxesRef.current = [];
+      beeHitboxesRef.current = [];
+      pigeonHitboxesRef.current = [];
       window.cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', resizeCanvas);
       sprites.forEach((sprite) => sprite.removeEventListener('load', handleSpriteLoad));
@@ -904,6 +1240,25 @@ export function SunflowerCanvas({
     const bounds = canvas.getBoundingClientRect();
     const pointerX = event.clientX - bounds.left;
     const pointerY = event.clientY - bounds.top;
+    const clickedPigeon = pigeonHitboxesRef.current.find((hitbox) =>
+      pointIsInside(pointerX, pointerY, hitbox),
+    );
+
+    if (clickedPigeon) {
+      const clickedPigeonIndex = pigeonsRef.current.findIndex(
+        (pigeon) => pigeon.id === clickedPigeon.id,
+      );
+
+      if (clickedPigeonIndex >= 0) {
+        pigeonsRef.current.splice(clickedPigeonIndex, 1);
+      }
+
+      pigeonHitboxesRef.current = pigeonHitboxesRef.current.filter(
+        (hitbox) => hitbox.id !== clickedPigeon.id,
+      );
+      return;
+    }
+
     const clickedBee = beeHitboxesRef.current.find((hitbox) =>
       pointIsInside(pointerX, pointerY, hitbox),
     );
@@ -917,6 +1272,40 @@ export function SunflowerCanvas({
 
       beeHitboxesRef.current = beeHitboxesRef.current.filter((hitbox) => hitbox.id !== clickedBee.id);
       return;
+    }
+
+    const clickedCloud = cloudHitboxesRef.current.find((hitbox) =>
+      pointIsInside(pointerX, pointerY, hitbox),
+    );
+
+    if (clickedCloud) {
+      const cloud = cloudsRef.current.find((candidate) => candidate.id === clickedCloud.id);
+
+      if (cloud?.isRainCloud) {
+        const existingBurst = rainBurstsRef.current.find((burst) => burst.cloudId === cloud.id);
+        const startedAt = performance.now();
+        const cloudCenterX = clickedCloud.x + clickedCloud.width / 2;
+        const isCloudOverPlantZone =
+          cloudCenterX >= bounds.width * RAIN_HYDRATION_MIN_SCREEN_PERCENT &&
+          cloudCenterX <= bounds.width * RAIN_HYDRATION_MAX_SCREEN_PERCENT;
+
+        if (existingBurst) {
+          existingBurst.startedAt = startedAt;
+          existingBurst.seed = Math.random() * 10_000;
+        } else {
+          rainBurstsRef.current.push({
+            cloudId: cloud.id,
+            startedAt,
+            seed: Math.random() * 10_000,
+          });
+        }
+
+        if (isCloudOverPlantZone) {
+          onRainCloudClickRef.current();
+        }
+
+        return;
+      }
     }
 
     if (hasSeedBroken || !seedHitbox) {

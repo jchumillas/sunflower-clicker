@@ -220,6 +220,14 @@ body {
   color: #ff8a7a;
 }
 
+.game-hud__metric-icon--hydration {
+  color: #2f91d8;
+}
+
+.game-hud[data-phase='night'] .game-hud__metric-icon--hydration {
+  color: #8bc7ff;
+}
+
 .game-hud__metric-label {
   letter-spacing: 0.02em;
 }
@@ -265,6 +273,21 @@ body {
 .game-hud__bar-fill--seed {
   background: linear-gradient(90deg, #c98a3a, #f2c266);
   box-shadow: 0 0 10px rgba(210, 160, 70, 0.4);
+}
+
+.game-hud__bar-fill--hydration {
+  background: linear-gradient(90deg, #248ed1, #72d6ff);
+  box-shadow: 0 0 10px rgba(80, 180, 240, 0.45);
+}
+
+.game-hud__bar-fill--hydration[data-level='mid'] {
+  background: linear-gradient(90deg, #2d89c6, #7ab8df);
+  box-shadow: 0 0 10px rgba(90, 160, 220, 0.38);
+}
+
+.game-hud__bar-fill--hydration[data-level='low'] {
+  background: linear-gradient(90deg, #786a43, #c09a4a);
+  box-shadow: 0 0 10px rgba(190, 145, 70, 0.42);
 }
 
 .game-hud__stage {

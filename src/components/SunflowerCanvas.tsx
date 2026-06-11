@@ -90,6 +90,7 @@ const CLOUD_ASPECT_RATIOS = [
   452 / 219,
   372 / 98,
 ];
+
 const FRAME_DURATION_MS = 75;
 const SEED_WIDTH = 128;
 const SEED_HEIGHT = 178;

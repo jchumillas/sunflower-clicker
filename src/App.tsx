@@ -8,6 +8,7 @@ import enemyKillSoundUrl from './assets/sounds/squeeze.mp3';
 import backgroundMusicUrl from './assets/sounds/music.wav';
 import seedCrackSoundUrl from './assets/sounds/crack.wav';
 import plantDeathSoundUrl from './assets/sounds/scream.wav';
+import gunshotSoundUrl from './assets/sounds/gunshot.mp3';
 
 const SEED_CLICKS_TO_SPROUT = 10;
 const MAX_PLANT_HEALTH = 100;
@@ -53,10 +54,12 @@ function App() {
   const enemyHitSoundsRef = useRef<HTMLAudioElement[]>([]);
   const plantDeathSoundsRef = useRef<HTMLAudioElement[]>([]);
   const seedCrackSoundsRef = useRef<HTMLAudioElement[]>([]);
+  const gunshotSoundsRef = useRef<HTMLAudioElement[]>([]);
   const enemyKillSoundIndexRef = useRef(0);
   const enemyHitSoundIndexRef = useRef(0);
   const plantDeathSoundIndexRef = useRef(0);
   const seedCrackSoundIndexRef = useRef(0);
+  const gunshotSoundIndexRef = useRef(0);
   const backgroundMusicRef = useRef<HTMLAudioElement | null>(null);
   const hasStartedBackgroundMusicRef = useRef(false);
   const plantHealthRef = useRef(MAX_PLANT_HEALTH);
@@ -101,6 +104,7 @@ function App() {
     enemyHitSoundsRef.current = createSoundPool(enemyHitSoundUrl, 0.68);
     plantDeathSoundsRef.current = createSoundPool(plantDeathSoundUrl, 0.72);
     seedCrackSoundsRef.current = createSoundPool(seedCrackSoundUrl, 0.7);
+    gunshotSoundsRef.current = createSoundPool(gunshotSoundUrl, 0.72);
   }, []);
 
   useEffect(() => {
@@ -168,6 +172,10 @@ function App() {
     playSoundFromPool(seedCrackSoundsRef.current, seedCrackSoundIndexRef);
   };
 
+  const playGunshotSound = () => {
+    playSoundFromPool(gunshotSoundsRef.current, gunshotSoundIndexRef);
+  };
+
   const stopBackgroundMusic = () => {
     const music = backgroundMusicRef.current;
 
@@ -220,6 +228,7 @@ function App() {
       enemyHitSoundsRef.current,
       plantDeathSoundsRef.current,
       seedCrackSoundsRef.current,
+      gunshotSoundsRef.current,
     ];
 
     audioPools.forEach((pool) => {
@@ -270,6 +279,7 @@ function App() {
         day: hudRef.current.day,
         maxDay: MAX_GROWTH_DAY,
         stage: hudRef.current.stage,
+        seedsCollected: score,
         beesPollinated: beesPollinatedRef.current,
         pigeonAttacks:
           pigeonAttacksRef.current + antAttacksRef.current + caterpillarAttacksRef.current,
@@ -430,6 +440,7 @@ function App() {
         onAntAttack={handleAntAttack}
         onCaterpillarAttack={handleCaterpillarAttack}
         onEnemyKilled={playEnemyKillSound}
+        onPigeonKilled={playGunshotSound}
         onSunflowerHeadClick={handleSunflowerHeadClick}
         onHudUpdate={setHud}
       />

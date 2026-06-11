@@ -10,6 +10,8 @@ import cloud03Url from '../assets/cloud/cloud_03.png';
 import cloud04Url from '../assets/cloud/cloud_04.png';
 import cloud05Url from '../assets/cloud/cloud_05.png';
 import deathSunflowerSpriteUrl from '../assets/die.png';
+import flySwatterSpriteUrl from '../assets/fly_swatter.png';
+import gunshotSpriteUrl from '../assets/gunshot.png';
 import moonSpriteUrl from '../assets/moon/moon.png';
 import pigeonSpriteUrl from '../assets/pidgeon/fly.png';
 import seedSpriteUrl from '../assets/seed.png';
@@ -91,8 +93,8 @@ const CLOUD_ASPECT_RATIOS = [
 const FRAME_DURATION_MS = 75;
 const SEED_WIDTH = 128;
 const SEED_HEIGHT = 178;
-const DAY_DURATION_MS = 30_000;
-const NIGHT_DURATION_MS = 10_000;
+const DAY_DURATION_MS = 15_000;
+const NIGHT_DURATION_MS = 15_000;
 const TOTAL_CYCLE_MS = DAY_DURATION_MS + NIGHT_DURATION_MS;
 const DAMAGE_FLASH_DURATION_MS = 220;
 const DAMAGE_FLASH_FILTER = 'brightness(1.18) sepia(1) saturate(7) hue-rotate(315deg)';
@@ -103,6 +105,12 @@ const SEED_PROJECTILE_MIN_ANGULAR_SPEED = 5.2;
 const SEED_PROJECTILE_MAX_ANGULAR_SPEED = 8.8;
 const SEED_PROJECTILE_MIN_HEIGHT = 34;
 const SEED_PROJECTILE_MAX_HEIGHT = 58;
+const FLY_SWATTER_WIDTH = 128;
+const FLY_SWATTER_HEIGHT = 142;
+const SWATTER_SMACK_DURATION_MS = 260;
+const GUNSHOT_WIDTH = 256;
+const GUNSHOT_HEIGHT = 154;
+const GUNSHOT_SHAKE_DURATION_MS = 320;
 const PARTICLE_COUNT = 16;
 const PARTICLE_MIN_DURATION_MS = 450;
 const PARTICLE_MAX_DURATION_MS = 700;
@@ -132,6 +140,7 @@ type SunflowerCanvasProps = {
   onAntAttack: () => void;
   onCaterpillarAttack: () => void;
   onEnemyKilled: () => void;
+  onPigeonKilled: () => void;
   onSunflowerHeadClick: () => void;
   onHudUpdate: (hud: HudInfo) => void;
 };
@@ -281,6 +290,37 @@ type Particle = {
   gravity: number;
   startedAt: number;
   duration: number;
+};
+
+type SwatterSmack = {
+  id: number;
+  x: number;
+  y: number;
+  size: number;
+  startedAt: number;
+  direction: -1 | 1;
+};
+
+type SwatterHover = {
+  x: number;
+  y: number;
+  size: number;
+};
+
+type GunshotShake = {
+  id: number;
+  x: number;
+  y: number;
+  size: number;
+  startedAt: number;
+  direction: -1 | 1;
+};
+
+type GunshotHover = {
+  x: number;
+  y: number;
+  size: number;
+  direction: -1 | 1;
 };
 
 const BACKGROUND_FLOWERS = [
@@ -452,6 +492,7 @@ export function SunflowerCanvas({
   onAntAttack,
   onCaterpillarAttack,
   onEnemyKilled,
+  onPigeonKilled,
   onSunflowerHeadClick,
   onHudUpdate,
 }: SunflowerCanvasProps) {
@@ -471,8 +512,14 @@ export function SunflowerCanvas({
   const caterpillarHitboxesRef = useRef<Array<Rect & { id: number }>>([]);
   const seedProjectilesRef = useRef<SeedProjectile[]>([]);
   const particlesRef = useRef<Particle[]>([]);
+  const swatterSmacksRef = useRef<SwatterSmack[]>([]);
+  const swatterHoverRef = useRef<SwatterHover | null>(null);
+  const gunshotShakesRef = useRef<GunshotShake[]>([]);
+  const gunshotHoverRef = useRef<GunshotHover | null>(null);
   const nextSeedProjectileIdRef = useRef(1);
   const nextParticleIdRef = useRef(1);
+  const nextSwatterSmackIdRef = useRef(1);
+  const nextGunshotShakeIdRef = useRef(1);
   const hasSeedBrokenRef = useRef(hasSeedBroken);
   const plantHealthRef = useRef(plantHealth);
   const previousPlantHealthRef = useRef(plantHealth);
@@ -486,6 +533,7 @@ export function SunflowerCanvas({
   const onAntAttackRef = useRef(onAntAttack);
   const onCaterpillarAttackRef = useRef(onCaterpillarAttack);
   const onEnemyKilledRef = useRef(onEnemyKilled);
+  const onPigeonKilledRef = useRef(onPigeonKilled);
   const onSunflowerHeadClickRef = useRef(onSunflowerHeadClick);
   const onHudUpdateRef = useRef(onHudUpdate);
 
@@ -513,6 +561,30 @@ export function SunflowerCanvas({
       });
       nextParticleIdRef.current += 1;
     }
+  };
+
+  const spawnSwatterSmack = (x: number, y: number, size: number) => {
+    swatterSmacksRef.current.push({
+      id: nextSwatterSmackIdRef.current,
+      x,
+      y,
+      size: clamp(size * 1.85, 68, 126),
+      startedAt: performance.now(),
+      direction: Math.random() < 0.5 ? -1 : 1,
+    });
+    nextSwatterSmackIdRef.current += 1;
+  };
+
+  const spawnGunshotShake = (x: number, y: number, size: number, direction: -1 | 1) => {
+    gunshotShakesRef.current.push({
+      id: nextGunshotShakeIdRef.current,
+      x,
+      y,
+      size: clamp(size * 1.35, 112, 178),
+      startedAt: performance.now(),
+      direction,
+    });
+    nextGunshotShakeIdRef.current += 1;
   };
 
   const launchSeedProjectile = (
@@ -545,6 +617,53 @@ export function SunflowerCanvas({
       height,
     });
     nextSeedProjectileIdRef.current += 1;
+  };
+
+  const getBugHitboxAtPoint = (pointX: number, pointY: number) =>
+    caterpillarHitboxesRef.current.find((hitbox) => pointIsInside(pointX, pointY, hitbox)) ??
+    antHitboxesRef.current.find((hitbox) => pointIsInside(pointX, pointY, hitbox)) ??
+    null;
+
+  const updateWeaponCursor = (canvas: HTMLCanvasElement, pointX: number, pointY: number) => {
+    if (plantHealthRef.current <= 0) {
+      canvas.style.cursor = '';
+      swatterHoverRef.current = null;
+      gunshotHoverRef.current = null;
+      return;
+    }
+
+    const pigeonHitbox = pigeonHitboxesRef.current.find((hitbox) =>
+      pointIsInside(pointX, pointY, hitbox),
+    );
+
+    if (pigeonHitbox) {
+      canvas.style.cursor = `url(${gunshotSpriteUrl}) 38 28, crosshair`;
+      swatterHoverRef.current = null;
+      gunshotHoverRef.current = {
+        x: pointX,
+        y: pointY,
+        size: clamp(Math.max(pigeonHitbox.width, pigeonHitbox.height) * 1.18, 112, 178),
+        direction: pointX < window.innerWidth / 2 ? 1 : -1,
+      };
+      return;
+    }
+
+    const bugHitbox = getBugHitboxAtPoint(pointX, pointY);
+
+    if (!bugHitbox) {
+      canvas.style.cursor = '';
+      swatterHoverRef.current = null;
+      gunshotHoverRef.current = null;
+      return;
+    }
+
+    canvas.style.cursor = `url(${flySwatterSpriteUrl}) 34 32, pointer`;
+    gunshotHoverRef.current = null;
+    swatterHoverRef.current = {
+      x: pointX,
+      y: pointY,
+      size: clamp(Math.max(bugHitbox.width, bugHitbox.height) * 1.75, 62, 116),
+    };
   };
 
   useEffect(() => {
@@ -599,6 +718,10 @@ export function SunflowerCanvas({
   }, [onEnemyKilled]);
 
   useEffect(() => {
+    onPigeonKilledRef.current = onPigeonKilled;
+  }, [onPigeonKilled]);
+
+  useEffect(() => {
     onSunflowerHeadClickRef.current = onSunflowerHeadClick;
   }, [onSunflowerHeadClick]);
 
@@ -650,12 +773,16 @@ export function SunflowerCanvas({
     const rainBursts = rainBurstsRef.current;
     const seedProjectiles = seedProjectilesRef.current;
     const particles = particlesRef.current;
+    const swatterSmacks = swatterSmacksRef.current;
+    const gunshotShakes = gunshotShakesRef.current;
 
     const beeSprite = new Image();
     const pigeonSprite = new Image();
     const caterpillarSprite = new Image();
     const blackAntSprite = new Image();
     const redAntSprite = new Image();
+    const flySwatterSprite = new Image();
+    const gunshotSprite = new Image();
     const cloudSprites = [
       new Image(),
       new Image(),
@@ -680,6 +807,8 @@ export function SunflowerCanvas({
       caterpillarSprite,
       blackAntSprite,
       redAntSprite,
+      flySwatterSprite,
+      gunshotSprite,
       ...cloudSprites,
       mainSunflowerSprite,
       angrySunflowerSprite,
@@ -1370,6 +1499,18 @@ export function SunflowerCanvas({
           particles.splice(index, 1);
         }
       }
+
+      for (let index = swatterSmacks.length - 1; index >= 0; index -= 1) {
+        if (timestamp - swatterSmacks[index].startedAt >= SWATTER_SMACK_DURATION_MS) {
+          swatterSmacks.splice(index, 1);
+        }
+      }
+
+      for (let index = gunshotShakes.length - 1; index >= 0; index -= 1) {
+        if (timestamp - gunshotShakes[index].startedAt >= GUNSHOT_SHAKE_DURATION_MS) {
+          gunshotShakes.splice(index, 1);
+        }
+      }
     };
 
     const drawSeedProjectiles = () => {
@@ -1404,6 +1545,124 @@ export function SunflowerCanvas({
         context.arc(particle.x, particle.y, radius, 0, Math.PI * 2);
         context.fill();
         context.restore();
+      });
+    };
+
+    const drawSwatterSmacks = (timestamp: number) => {
+      swatterSmacks.forEach((smack) => {
+        const progress = clamp((timestamp - smack.startedAt) / SWATTER_SMACK_DURATION_MS, 0, 1);
+        const hitProgress = smoothStep(clamp(progress / 0.48, 0, 1));
+        const fadeProgress = smoothStep(clamp((progress - 0.58) / 0.42, 0, 1));
+        const drawWidth = smack.size;
+        const drawHeight = drawWidth * (FLY_SWATTER_HEIGHT / FLY_SWATTER_WIDTH);
+        const rotation =
+          lerp(-0.82 * smack.direction, 0.14 * smack.direction, hitProgress) +
+          Math.sin(progress * Math.PI * 2) * 0.06 * (1 - progress);
+        const yOffset = lerp(-drawHeight * 0.32, 0, hitProgress);
+
+        context.save();
+        context.globalAlpha = 1 - fadeProgress;
+        context.translate(smack.x, smack.y + yOffset);
+        context.rotate(rotation);
+        context.drawImage(
+          flySwatterSprite,
+          -drawWidth * 0.48,
+          -drawHeight * 0.58,
+          drawWidth,
+          drawHeight,
+        );
+        context.restore();
+      });
+    };
+
+    const drawSwatterHover = (timestamp: number) => {
+      const hover = swatterHoverRef.current;
+
+      if (!hover || plantHealthRef.current <= 0) {
+        return;
+      }
+
+      const drawWidth = hover.size;
+      const drawHeight = drawWidth * (FLY_SWATTER_HEIGHT / FLY_SWATTER_WIDTH);
+      const sway = Math.sin(timestamp / 180) * 0.045;
+
+      context.save();
+      context.globalAlpha = 0.92;
+      context.translate(hover.x, hover.y);
+      context.rotate(-0.36 + sway);
+      context.drawImage(
+        flySwatterSprite,
+        -drawWidth * 0.42,
+        -drawHeight * 0.56,
+        drawWidth,
+        drawHeight,
+      );
+      context.restore();
+    };
+
+    const drawGunshotSprite = (
+      x: number,
+      y: number,
+      size: number,
+      direction: -1 | 1,
+      rotation: number,
+      alpha: number,
+      recoilX = 0,
+      recoilY = 0,
+    ) => {
+      const drawWidth = size;
+      const drawHeight = drawWidth * (GUNSHOT_HEIGHT / GUNSHOT_WIDTH);
+
+      context.save();
+      context.globalAlpha = alpha;
+      context.translate(x + recoilX, y + recoilY);
+
+      if (direction === -1) {
+        context.scale(-1, 1);
+      }
+
+      context.rotate(rotation * direction);
+      context.drawImage(
+        gunshotSprite,
+        -drawWidth * 0.34,
+        -drawHeight * 0.52,
+        drawWidth,
+        drawHeight,
+      );
+      context.restore();
+    };
+
+    const drawGunshotHover = (timestamp: number) => {
+      const hover = gunshotHoverRef.current;
+
+      if (!hover || plantHealthRef.current <= 0) {
+        return;
+      }
+
+      const sway = Math.sin(timestamp / 150) * 0.035;
+
+      drawGunshotSprite(hover.x, hover.y, hover.size, hover.direction, -0.08 + sway, 0.94);
+    };
+
+    const drawGunshotShakes = (timestamp: number) => {
+      gunshotShakes.forEach((shake) => {
+        const progress = clamp((timestamp - shake.startedAt) / GUNSHOT_SHAKE_DURATION_MS, 0, 1);
+        const fadeProgress = smoothStep(clamp((progress - 0.66) / 0.34, 0, 1));
+        const recoil = Math.sin(progress * Math.PI * 10) * (1 - progress);
+        const recoilX = -shake.direction * recoil * 18;
+        const recoilY = Math.cos(progress * Math.PI * 8) * (1 - progress) * 7;
+        const rotation = -0.1 + recoil * 0.16;
+
+        drawGunshotSprite(
+          shake.x,
+          shake.y,
+          shake.size,
+          shake.direction,
+          rotation,
+          1 - fadeProgress,
+          recoilX,
+          recoilY,
+        );
       });
     };
 
@@ -1858,6 +2117,10 @@ export function SunflowerCanvas({
         ants.splice(0);
         seedProjectiles.splice(0);
         particles.splice(0);
+        swatterSmacks.splice(0);
+        gunshotShakes.splice(0);
+        swatterHoverRef.current = null;
+        gunshotHoverRef.current = null;
         beeHitboxesRef.current = [];
         pigeonHitboxesRef.current = [];
         caterpillarHitboxesRef.current = [];
@@ -1900,6 +2163,10 @@ export function SunflowerCanvas({
       drawBees(timestamp);
       drawSeedProjectiles();
       drawParticles(timestamp);
+      drawGunshotHover(timestamp);
+      drawSwatterHover(timestamp);
+      drawGunshotShakes(timestamp);
+      drawSwatterSmacks(timestamp);
       drawCriticalHealthVignette(canvasWidth, canvasHeight);
       emitHud(timestamp, cycleState, lifecycle);
     };
@@ -1945,6 +2212,8 @@ export function SunflowerCanvas({
     caterpillarSprite.src = caterpillarSpriteUrl;
     blackAntSprite.src = blackAntSpriteUrl;
     redAntSprite.src = redAntSpriteUrl;
+    flySwatterSprite.src = flySwatterSpriteUrl;
+    gunshotSprite.src = gunshotSpriteUrl;
     cloudSprites[0].src = cloud01Url;
     cloudSprites[1].src = cloud02Url;
     cloudSprites[2].src = cloud03Url;
@@ -1968,6 +2237,10 @@ export function SunflowerCanvas({
       rainBursts.splice(0);
       seedProjectiles.splice(0);
       particles.splice(0);
+      swatterSmacks.splice(0);
+      gunshotShakes.splice(0);
+      swatterHoverRef.current = null;
+      gunshotHoverRef.current = null;
       cloudHitboxesRef.current = [];
       beeHitboxesRef.current = [];
       pigeonHitboxesRef.current = [];
@@ -2007,7 +2280,15 @@ export function SunflowerCanvas({
 
       if (clickedPigeonIndex >= 0) {
         pigeonsRef.current.splice(clickedPigeonIndex, 1);
-        onEnemyKilledRef.current();
+        canvas.style.cursor = '';
+        gunshotHoverRef.current = null;
+        onPigeonKilledRef.current();
+        spawnGunshotShake(
+          clickedPigeon.x + clickedPigeon.width / 2,
+          clickedPigeon.y + clickedPigeon.height / 2,
+          Math.max(clickedPigeon.width, clickedPigeon.height),
+          pointerX < bounds.width / 2 ? 1 : -1,
+        );
         emitParticles(
           clickedPigeon.x + clickedPigeon.width / 2,
           clickedPigeon.y + clickedPigeon.height / 2,
@@ -2032,7 +2313,14 @@ export function SunflowerCanvas({
 
       if (clickedCaterpillarIndex >= 0) {
         caterpillarsRef.current.splice(clickedCaterpillarIndex, 1);
+        canvas.style.cursor = '';
+        swatterHoverRef.current = null;
         onEnemyKilledRef.current();
+        spawnSwatterSmack(
+          clickedCaterpillar.x + clickedCaterpillar.width / 2,
+          clickedCaterpillar.y + clickedCaterpillar.height / 2,
+          Math.max(clickedCaterpillar.width, clickedCaterpillar.height),
+        );
         emitParticles(
           clickedCaterpillar.x + clickedCaterpillar.width / 2,
           clickedCaterpillar.y + clickedCaterpillar.height / 2,
@@ -2055,7 +2343,14 @@ export function SunflowerCanvas({
 
       if (clickedAntIndex >= 0) {
         antsRef.current.splice(clickedAntIndex, 1);
+        canvas.style.cursor = '';
+        swatterHoverRef.current = null;
         onEnemyKilledRef.current();
+        spawnSwatterSmack(
+          clickedAnt.x + clickedAnt.width / 2,
+          clickedAnt.y + clickedAnt.height / 2,
+          Math.max(clickedAnt.width, clickedAnt.height),
+        );
         emitParticles(
           clickedAnt.x + clickedAnt.width / 2,
           clickedAnt.y + clickedAnt.height / 2,
@@ -2135,7 +2430,30 @@ export function SunflowerCanvas({
     }
 
     if (pointIsInside(pointerX, pointerY, seedHitbox)) {
+      emitParticles(pointerX, pointerY, 'seed');
       onSeedClickRef.current();
+    }
+  };
+
+  const handlePointerMove = (event: PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+
+    if (!canvas) {
+      return;
+    }
+
+    const bounds = canvas.getBoundingClientRect();
+
+    updateWeaponCursor(canvas, event.clientX - bounds.left, event.clientY - bounds.top);
+  };
+
+  const handlePointerLeave = () => {
+    const canvas = canvasRef.current;
+
+    if (canvas) {
+      canvas.style.cursor = '';
+      swatterHoverRef.current = null;
+      gunshotHoverRef.current = null;
     }
   };
 
@@ -2157,6 +2475,8 @@ export function SunflowerCanvas({
       tabIndex={hasSeedBroken ? -1 : 0}
       onKeyDown={handleKeyDown}
       onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerLeave={handlePointerLeave}
     />
   );
 }

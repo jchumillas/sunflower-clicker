@@ -31,6 +31,7 @@ const MAIN_FRAME_WIDTH = 360;
 const MAIN_FRAME_HEIGHT = 527;
 const VERY_ANGRY_COLUMNS = 3;
 const VERY_ANGRY_FRAME_COUNT = 8;
+const VERY_ANGRY_OPEN_MOUTH_TRIGGER_FRAME = 1;
 const DEATH_COLUMNS = 3;
 const DEATH_FRAME_COUNT = 5;
 const DEATH_FRAME_WIDTH = 400;
@@ -51,6 +52,9 @@ const BEE_FRAME_COUNT = 2;
 const BEE_FRAME_DURATION_MS = 50;
 const BEE_MIN_SPAWN_DELAY_MS = 5_000;
 const BEE_MAX_SPAWN_DELAY_MS = 10_000;
+const BEE_SPEED_MULTIPLIER = 1.5;
+const BEE_CHAOS_STRENGTH = 0.74;
+const BEE_VERTICAL_JITTER_STRENGTH = 0.22;
 const PIGEON_COLUMNS = 4;
 const PIGEON_ROWS = 4;
 const PIGEON_FRAME_COUNT = PIGEON_COLUMNS * PIGEON_ROWS;
@@ -100,6 +104,8 @@ const NIGHT_DURATION_MS = 15_000;
 const TOTAL_CYCLE_MS = DAY_DURATION_MS + NIGHT_DURATION_MS;
 const DAMAGE_FLASH_DURATION_MS = 220;
 const DAMAGE_FLASH_FILTER = 'brightness(1.18) sepia(1) saturate(7) hue-rotate(315deg)';
+const HEAL_FLASH_DURATION_MS = 260;
+const HEAL_FLASH_FILTER = 'brightness(1.24) sepia(1) saturate(5.8) hue-rotate(62deg)';
 const CRITICAL_HEALTH_THRESHOLD = 25;
 const SEED_PROJECTILE_MIN_SPEED_X = 180;
 const SEED_PROJECTILE_MAX_SPEED_X = 280;
@@ -121,6 +127,7 @@ const PARTICLE_COLORS = {
   seed: ['#fff1a7', '#ffd35f', '#d98a24', '#80531c'],
 };
 export const MAX_GROWTH_DAY = 5;
+const VICTORY_ELAPSED_MS = TOTAL_CYCLE_MS * MAX_GROWTH_DAY;
 
 export type PlantStage = 'seed' | 'sprout' | 'sunflower';
 export type CyclePhase = 'day' | 'night';
@@ -134,6 +141,7 @@ export type HudInfo = {
 
 type SunflowerCanvasProps = {
   hasSeedBroken: boolean;
+  isGameEnded: boolean;
   plantHealth: number;
   onSeedClick: () => void;
   onBeePollinate: () => void;
@@ -143,6 +151,9 @@ type SunflowerCanvasProps = {
   onCaterpillarAttack: () => void;
   onEnemyKilled: () => void;
   onPigeonKilled: () => void;
+  onBeePresenceChange: (hasBees: boolean) => void;
+  onVictory: () => void;
+  onCriticalScream: () => void;
   onSunflowerHeadClick: () => void;
   onHudUpdate: (hud: HudInfo) => void;
 };
@@ -490,6 +501,7 @@ const getSkyColors = ({ isDay, progress }: CycleState) => {
 
 export function SunflowerCanvas({
   hasSeedBroken,
+  isGameEnded,
   plantHealth,
   onSeedClick,
   onBeePollinate,
@@ -499,6 +511,9 @@ export function SunflowerCanvas({
   onCaterpillarAttack,
   onEnemyKilled,
   onPigeonKilled,
+  onBeePresenceChange,
+  onVictory,
+  onCriticalScream,
   onSunflowerHeadClick,
   onHudUpdate,
 }: SunflowerCanvasProps) {
@@ -527,9 +542,11 @@ export function SunflowerCanvas({
   const nextSwatterSmackIdRef = useRef(1);
   const nextGunshotShakeIdRef = useRef(1);
   const hasSeedBrokenRef = useRef(hasSeedBroken);
+  const isGameEndedRef = useRef(isGameEnded);
   const plantHealthRef = useRef(plantHealth);
   const previousPlantHealthRef = useRef(plantHealth);
   const damageFlashUntilRef = useRef(0);
+  const healFlashUntilRef = useRef(0);
   const deathStartedAtRef = useRef<number | null>(plantHealth <= 0 ? performance.now() : null);
   const seedBrokenAtRef = useRef<number | null>(null);
   const onSeedClickRef = useRef(onSeedClick);
@@ -540,6 +557,9 @@ export function SunflowerCanvas({
   const onCaterpillarAttackRef = useRef(onCaterpillarAttack);
   const onEnemyKilledRef = useRef(onEnemyKilled);
   const onPigeonKilledRef = useRef(onPigeonKilled);
+  const onBeePresenceChangeRef = useRef(onBeePresenceChange);
+  const onVictoryRef = useRef(onVictory);
+  const onCriticalScreamRef = useRef(onCriticalScream);
   const onSunflowerHeadClickRef = useRef(onSunflowerHeadClick);
   const onHudUpdateRef = useRef(onHudUpdate);
 
@@ -631,7 +651,7 @@ export function SunflowerCanvas({
     null;
 
   const updateWeaponCursor = (canvas: HTMLCanvasElement, pointX: number, pointY: number) => {
-    if (plantHealthRef.current <= 0) {
+    if (plantHealthRef.current <= 0 || isGameEndedRef.current) {
       canvas.style.cursor = '';
       swatterHoverRef.current = null;
       gunshotHoverRef.current = null;
@@ -681,8 +701,14 @@ export function SunflowerCanvas({
   }, [hasSeedBroken]);
 
   useEffect(() => {
+    isGameEndedRef.current = isGameEnded;
+  }, [isGameEnded]);
+
+  useEffect(() => {
     if (plantHealth < previousPlantHealthRef.current) {
       damageFlashUntilRef.current = performance.now() + DAMAGE_FLASH_DURATION_MS;
+    } else if (plantHealth > previousPlantHealthRef.current) {
+      healFlashUntilRef.current = performance.now() + HEAL_FLASH_DURATION_MS;
     }
 
     if (plantHealth <= 0 && previousPlantHealthRef.current > 0) {
@@ -728,6 +754,18 @@ export function SunflowerCanvas({
   }, [onPigeonKilled]);
 
   useEffect(() => {
+    onBeePresenceChangeRef.current = onBeePresenceChange;
+  }, [onBeePresenceChange]);
+
+  useEffect(() => {
+    onVictoryRef.current = onVictory;
+  }, [onVictory]);
+
+  useEffect(() => {
+    onCriticalScreamRef.current = onCriticalScream;
+  }, [onCriticalScream]);
+
+  useEffect(() => {
     onSunflowerHeadClickRef.current = onSunflowerHeadClick;
   }, [onSunflowerHeadClick]);
 
@@ -771,6 +809,9 @@ export function SunflowerCanvas({
     let lastHudEmitTime = 0;
     let lastCloudUpdateTime = 0;
     let lastEffectsUpdateTime = 0;
+    let lastBeePresence = false;
+    let hasVictoryBeenEmitted = false;
+    let lastCriticalScreamFrame = -1;
     const bees = beesRef.current;
     const pigeons = pigeonsRef.current;
     const caterpillars = caterpillarsRef.current;
@@ -828,6 +869,17 @@ export function SunflowerCanvas({
       sunFaceSprite,
       sunCrownSprite,
     ];
+
+    const emitBeePresenceChange = () => {
+      const hasBees = bees.length > 0;
+
+      if (hasBees === lastBeePresence) {
+        return;
+      }
+
+      lastBeePresence = hasBees;
+      onBeePresenceChangeRef.current(hasBees);
+    };
 
     const resizeCanvas = () => {
       const pixelRatio = window.devicePixelRatio || 1;
@@ -1113,7 +1165,7 @@ export function SunflowerCanvas({
       scale: number,
       opacity = 1,
       brightness = 1,
-      isDamageFlashing = false,
+      flashFilter: string | null = null,
     ) => {
       const column = frame % frameColumns;
       const row = Math.floor(frame / frameColumns);
@@ -1126,9 +1178,7 @@ export function SunflowerCanvas({
 
       context.save();
       context.globalAlpha = opacity;
-      context.filter = isDamageFlashing
-        ? DAMAGE_FLASH_FILTER
-        : `brightness(${brightness})`;
+      context.filter = flashFilter ?? `brightness(${brightness})`;
       context.drawImage(
         sprite,
         sourceX,
@@ -1141,6 +1191,18 @@ export function SunflowerCanvas({
         drawHeight,
       );
       context.restore();
+    };
+
+    const getPlantFlashFilter = (timestamp: number) => {
+      if (timestamp < healFlashUntilRef.current) {
+        return HEAL_FLASH_FILTER;
+      }
+
+      if (timestamp < damageFlashUntilRef.current) {
+        return DAMAGE_FLASH_FILTER;
+      }
+
+      return null;
     };
 
     const getBackgroundSceneScale = (canvasWidth: number, canvasHeight: number) => {
@@ -1184,7 +1246,7 @@ export function SunflowerCanvas({
       const pivotX = drawX + seedWidth / 2;
       const pivotY = drawY + seedHeight * 0.9;
       const seedSway = Math.sin(timestamp / 380) * 0.08;
-      const isDamageFlashing = timestamp < damageFlashUntilRef.current;
+      const plantFlashFilter = getPlantFlashFilter(timestamp);
 
       seedHitboxRef.current = {
         x: drawX,
@@ -1194,7 +1256,7 @@ export function SunflowerCanvas({
       };
 
       context.save();
-      context.filter = isDamageFlashing ? DAMAGE_FLASH_FILTER : 'none';
+      context.filter = plantFlashFilter ?? 'none';
       context.translate(pivotX, pivotY);
       context.rotate(seedSway);
       context.drawImage(
@@ -1233,10 +1295,10 @@ export function SunflowerCanvas({
       const sproutPivotX = centerX;
       const sproutPivotY = soilY + soilHeight * 0.33;
       const sproutSway = Math.sin(timestamp / 460) * 0.055;
-      const isDamageFlashing = timestamp < damageFlashUntilRef.current;
+      const plantFlashFilter = getPlantFlashFilter(timestamp);
 
       context.save();
-      context.filter = isDamageFlashing ? DAMAGE_FLASH_FILTER : 'none';
+      context.filter = plantFlashFilter ?? 'none';
 
       if (part !== 'sprout') {
         context.drawImage(soilSprite, soilX, soilY, soilWidth, soilHeight);
@@ -1290,7 +1352,17 @@ export function SunflowerCanvas({
             : mainSunflowerSprite;
       const frame = health < 25 ? currentFrame % VERY_ANGRY_FRAME_COUNT : currentFrame;
       const frameColumns = health < 25 ? VERY_ANGRY_COLUMNS : COLUMNS;
-      const isDamageFlashing = timestamp < damageFlashUntilRef.current;
+      const plantFlashFilter = getPlantFlashFilter(timestamp);
+
+      if (
+        health > 0 &&
+        health < CRITICAL_HEALTH_THRESHOLD &&
+        frame === VERY_ANGRY_OPEN_MOUTH_TRIGGER_FRAME &&
+        currentFrame !== lastCriticalScreamFrame
+      ) {
+        lastCriticalScreamFrame = currentFrame;
+        onCriticalScreamRef.current();
+      }
 
       sunflowerHeadHitboxRef.current = {
         x: metrics.targetX,
@@ -1309,7 +1381,7 @@ export function SunflowerCanvas({
         metrics.scale,
         1,
         1,
-        isDamageFlashing,
+        plantFlashFilter,
       );
     };
 
@@ -1374,7 +1446,7 @@ export function SunflowerCanvas({
         id: nextBeeId,
         x,
         y,
-        speed: 55 + Math.random() * 35,
+        speed: (55 + Math.random() * 35) * BEE_SPEED_MULTIPLIER,
         size,
         wobble: Math.random() * Math.PI * 2,
         side,
@@ -1392,7 +1464,7 @@ export function SunflowerCanvas({
       const elapsedSeconds = lastBeeUpdateTime === 0 ? 0 : (timestamp - lastBeeUpdateTime) / 1_000;
       lastBeeUpdateTime = timestamp;
 
-      if (lifecycle.stage !== 'sunflower' || !cycleState.isDay) {
+      if (lifecycle.stage !== 'sunflower') {
         bees.splice(0);
         nextBeeSpawnAt = Number.POSITIVE_INFINITY;
         return;
@@ -1400,13 +1472,17 @@ export function SunflowerCanvas({
 
       const sunflowerMetrics = getSunflowerMetrics(canvasWidth, canvasHeight, lifecycle.growthScale);
 
-      if (!Number.isFinite(nextBeeSpawnAt)) {
-        nextBeeSpawnAt = timestamp + getRandomBeeSpawnDelay();
-      }
+      if (cycleState.isDay) {
+        if (!Number.isFinite(nextBeeSpawnAt)) {
+          nextBeeSpawnAt = timestamp + getRandomBeeSpawnDelay();
+        }
 
-      if (timestamp >= nextBeeSpawnAt) {
-        spawnBee(canvasWidth, canvasHeight, sunflowerMetrics.targetY);
-        nextBeeSpawnAt = timestamp + getRandomBeeSpawnDelay();
+        if (timestamp >= nextBeeSpawnAt) {
+          spawnBee(canvasWidth, canvasHeight, sunflowerMetrics.targetY);
+          nextBeeSpawnAt = timestamp + getRandomBeeSpawnDelay();
+        }
+      } else {
+        nextBeeSpawnAt = Number.POSITIVE_INFINITY;
       }
 
       for (let index = bees.length - 1; index >= 0; index -= 1) {
@@ -1422,20 +1498,43 @@ export function SunflowerCanvas({
         }
 
         if (distance > 0) {
-          bee.x += (dx / distance) * bee.speed * elapsedSeconds;
-          bee.y += (dy / distance) * bee.speed * elapsedSeconds;
+          const directionX = dx / distance;
+          const directionY = dy / distance;
+          const perpendicularX = -directionY;
+          const perpendicularY = directionX;
+          const chaoticDrift =
+            Math.sin(timestamp / 145 + bee.wobble) * BEE_CHAOS_STRENGTH +
+            Math.sin(timestamp / 79 + bee.wobble * 1.9) * BEE_CHAOS_STRENGTH * 0.42;
+          const verticalJitter =
+            Math.sin(timestamp / 105 + bee.wobble * 2.7) * BEE_VERTICAL_JITTER_STRENGTH;
+
+          bee.x +=
+            (directionX + perpendicularX * chaoticDrift) * bee.speed * elapsedSeconds;
+          bee.y +=
+            (directionY + perpendicularY * chaoticDrift + verticalJitter) *
+            bee.speed *
+            elapsedSeconds;
         }
       }
     };
 
-    const drawBees = (timestamp: number) => {
+    const drawBees = (
+      canvasWidth: number,
+      canvasHeight: number,
+      timestamp: number,
+      lifecycle: PlantLifecycle,
+    ) => {
       const beeFrame = Math.floor(timestamp / BEE_FRAME_DURATION_MS) % BEE_FRAME_COUNT;
+      const target = getPlantTarget(canvasWidth, canvasHeight, lifecycle);
 
       beeHitboxesRef.current = bees.map((bee) => {
         const hoverY = Math.sin(timestamp / 210 + bee.wobble) * 8;
         const drawSize = bee.size;
         const drawX = bee.x - drawSize / 2;
         const drawY = bee.y + hoverY - drawSize / 2;
+        const targetAngle = Math.atan2(target.y - (bee.y + hoverY), target.x - bee.x);
+        const spriteHeadAngle = -Math.PI * 0.75;
+        const rotation = targetAngle - spriteHeadAngle;
         const hitbox = {
           id: bee.id,
           x: drawX,
@@ -1443,14 +1542,10 @@ export function SunflowerCanvas({
           width: drawSize,
           height: drawSize,
         };
-        const shouldFlip = bee.side === -1;
 
         context.save();
         context.translate(bee.x, bee.y + hoverY);
-
-        if (shouldFlip) {
-          context.scale(-1, 1);
-        }
+        context.rotate(rotation);
 
         context.drawImage(
           beeSprite,
@@ -2131,10 +2226,24 @@ export function SunflowerCanvas({
       const cycleState = getCycleState(timestamp, cycleStart);
       const lifecycle = getPlantLifecycle(timestamp);
       const isPlantDead = plantHealthRef.current <= 0;
+      const isGameEnded = isGameEndedRef.current || hasVictoryBeenEmitted;
+      const seedBrokenAt = seedBrokenAtRef.current;
+
+      if (
+        !hasVictoryBeenEmitted &&
+        !isGameEndedRef.current &&
+        !isPlantDead &&
+        seedBrokenAt !== null &&
+        timestamp - seedBrokenAt >= VICTORY_ELAPSED_MS
+      ) {
+        hasVictoryBeenEmitted = true;
+        isGameEndedRef.current = true;
+        onVictoryRef.current();
+      }
 
       updateClouds(canvasWidth, timestamp);
 
-      if (isPlantDead) {
+      if (isPlantDead || isGameEnded) {
         bees.splice(0);
         pigeons.splice(0);
         caterpillars.splice(0);
@@ -2149,7 +2258,9 @@ export function SunflowerCanvas({
         pigeonHitboxesRef.current = [];
         caterpillarHitboxesRef.current = [];
         antHitboxesRef.current = [];
-        sunflowerHeadHitboxRef.current = null;
+        if (isPlantDead) {
+          sunflowerHeadHitboxRef.current = null;
+        }
       } else {
         updateBees(canvasWidth, canvasHeight, timestamp, cycleState, lifecycle);
         updatePigeons(canvasWidth, canvasHeight, timestamp, lifecycle);
@@ -2157,6 +2268,8 @@ export function SunflowerCanvas({
         updateAnts(canvasWidth, canvasHeight, timestamp, lifecycle);
         updateEffects(canvasWidth, canvasHeight, timestamp);
       }
+
+      emitBeePresenceChange();
 
       context.clearRect(0, 0, canvasWidth, canvasHeight);
       drawSky(canvasWidth, canvasHeight, cycleState);
@@ -2184,7 +2297,7 @@ export function SunflowerCanvas({
         drawMainSunflower(canvasWidth, canvasHeight, lifecycle.growthScale, timestamp);
       }
 
-      drawBees(timestamp);
+      drawBees(canvasWidth, canvasHeight, timestamp, lifecycle);
       drawSeedProjectiles();
       drawParticles(timestamp);
       drawGunshotHover(timestamp);
@@ -2272,6 +2385,10 @@ export function SunflowerCanvas({
       antHitboxesRef.current = [];
       seedHitboxRef.current = null;
       sunflowerHeadHitboxRef.current = null;
+      if (lastBeePresence) {
+        lastBeePresence = false;
+        onBeePresenceChangeRef.current(false);
+      }
       window.cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', resizeCanvas);
       sprites.forEach((sprite) => sprite.removeEventListener('load', handleSpriteLoad));
@@ -2286,7 +2403,7 @@ export function SunflowerCanvas({
       return;
     }
 
-    if (plantHealthRef.current <= 0) {
+    if (plantHealthRef.current <= 0 || isGameEndedRef.current) {
       return;
     }
 
@@ -2395,6 +2512,19 @@ export function SunflowerCanvas({
 
       if (clickedBeeIndex >= 0) {
         beesRef.current.splice(clickedBeeIndex, 1);
+        canvas.style.cursor = '';
+        swatterHoverRef.current = null;
+        onEnemyKilledRef.current();
+        spawnSwatterSmack(
+          clickedBee.x + clickedBee.width / 2,
+          clickedBee.y + clickedBee.height / 2,
+          Math.max(clickedBee.width, clickedBee.height),
+        );
+        emitParticles(
+          clickedBee.x + clickedBee.width / 2,
+          clickedBee.y + clickedBee.height / 2,
+          'enemy',
+        );
       }
 
       beeHitboxesRef.current = beeHitboxesRef.current.filter((hitbox) => hitbox.id !== clickedBee.id);
@@ -2482,7 +2612,12 @@ export function SunflowerCanvas({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLCanvasElement>) => {
-    if (plantHealthRef.current <= 0 || hasSeedBroken || (event.key !== 'Enter' && event.key !== ' ')) {
+    if (
+      plantHealthRef.current <= 0 ||
+      isGameEndedRef.current ||
+      hasSeedBroken ||
+      (event.key !== 'Enter' && event.key !== ' ')
+    ) {
       return;
     }
 

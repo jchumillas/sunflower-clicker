@@ -9,6 +9,8 @@ import backgroundMusicUrl from './assets/sounds/music.wav';
 import seedCrackSoundUrl from './assets/sounds/crack.wav';
 import plantDeathSoundUrl from './assets/sounds/scream.wav';
 import gunshotSoundUrl from './assets/sounds/gunshot.mp3';
+import beeSoundUrl from './assets/sounds/bee.wav';
+import criticalScreamSoundUrl from './assets/sounds/scream_2.ogg';
 
 const SEED_CLICKS_TO_SPROUT = 30;
 const MAX_PLANT_HEALTH = 100;
@@ -23,6 +25,7 @@ const CATERPILLAR_ATTACK_DAMAGE = 5;
 const GAME_OVER_MODAL_DELAY_MS = 900;
 const SOUND_POOL_SIZE = 4;
 const BACKGROUND_MUSIC_VOLUME = 0.28;
+const BEE_LOOP_VOLUME = 0.34;
 const CRITICAL_HEALTH_THRESHOLD = 25;
 const NORMAL_BACKGROUND_MUSIC_RATE = 1;
 const CRITICAL_BACKGROUND_MUSIC_RATE = 1.3;
@@ -55,18 +58,39 @@ function App() {
   const plantDeathSoundsRef = useRef<HTMLAudioElement[]>([]);
   const seedCrackSoundsRef = useRef<HTMLAudioElement[]>([]);
   const gunshotSoundsRef = useRef<HTMLAudioElement[]>([]);
+  const criticalScreamSoundsRef = useRef<HTMLAudioElement[]>([]);
   const enemyKillSoundIndexRef = useRef(0);
   const enemyHitSoundIndexRef = useRef(0);
   const plantDeathSoundIndexRef = useRef(0);
   const seedCrackSoundIndexRef = useRef(0);
   const gunshotSoundIndexRef = useRef(0);
+  const criticalScreamSoundIndexRef = useRef(0);
   const backgroundMusicRef = useRef<HTMLAudioElement | null>(null);
+  const beeLoopRef = useRef<HTMLAudioElement | null>(null);
   const hasStartedBackgroundMusicRef = useRef(false);
+  const hasBeeInScreenRef = useRef(false);
   const plantHealthRef = useRef(MAX_PLANT_HEALTH);
   const previousPlantHealthRef = useRef(MAX_PLANT_HEALTH);
   const isGameOverRef = useRef(false);
   const hasSeedBroken = seedClicks >= SEED_CLICKS_TO_SPROUT;
   const isGameOver = gameOverStats !== null;
+
+  const buildEndStats = (result: GameOverStats['result']): GameOverStats => {
+    const elapsedMs =
+      runStartRef.current === null ? 0 : performance.now() - runStartRef.current;
+
+    return {
+      result,
+      day: result === 'victory' ? MAX_GROWTH_DAY : hudRef.current.day,
+      maxDay: MAX_GROWTH_DAY,
+      stage: result === 'victory' ? 'sunflower' : hudRef.current.stage,
+      seedsCollected: score,
+      beesPollinated: beesPollinatedRef.current,
+      pigeonAttacks:
+        pigeonAttacksRef.current + antAttacksRef.current + caterpillarAttacksRef.current,
+      survivalSeconds: elapsedMs / 1_000,
+    };
+  };
 
   useEffect(() => {
     hydrationRef.current = hydration;
@@ -105,6 +129,7 @@ function App() {
     plantDeathSoundsRef.current = createSoundPool(plantDeathSoundUrl, 0.72);
     seedCrackSoundsRef.current = createSoundPool(seedCrackSoundUrl, 0.7);
     gunshotSoundsRef.current = createSoundPool(gunshotSoundUrl, 0.72);
+    criticalScreamSoundsRef.current = createSoundPool(criticalScreamSoundUrl, 0.6);
   }, []);
 
   useEffect(() => {
@@ -123,6 +148,22 @@ function App() {
       music.pause();
       backgroundMusicRef.current = null;
       hasStartedBackgroundMusicRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const beeLoop = new Audio(beeSoundUrl);
+
+    beeLoop.loop = true;
+    beeLoop.preload = 'auto';
+    beeLoop.volume = BEE_LOOP_VOLUME;
+    beeLoopRef.current = beeLoop;
+
+    return () => {
+      beeLoop.pause();
+      beeLoop.currentTime = 0;
+      beeLoopRef.current = null;
+      hasBeeInScreenRef.current = false;
     };
   }, []);
 
@@ -176,6 +217,48 @@ function App() {
     playSoundFromPool(gunshotSoundsRef.current, gunshotSoundIndexRef);
   };
 
+  const playCriticalScreamSound = () => {
+    playSoundFromPool(criticalScreamSoundsRef.current, criticalScreamSoundIndexRef);
+  };
+
+  const stopBeeLoop = () => {
+    const beeLoop = beeLoopRef.current;
+
+    if (!beeLoop) {
+      return;
+    }
+
+    beeLoop.pause();
+    beeLoop.currentTime = 0;
+  };
+
+  const syncBeeLoop = () => {
+    const beeLoop = beeLoopRef.current;
+
+    if (!beeLoop) {
+      return;
+    }
+
+    const shouldPlay =
+      soundEnabled &&
+      hasBeeInScreenRef.current &&
+      plantHealthRef.current > 0 &&
+      !isGameOverRef.current;
+
+    beeLoop.muted = !soundEnabled;
+
+    if (!shouldPlay) {
+      beeLoop.pause();
+      return;
+    }
+
+    if (beeLoop.paused) {
+      void beeLoop.play().catch(() => {
+        // Browsers can block sound until the first user gesture.
+      });
+    }
+  };
+
   const stopBackgroundMusic = () => {
     const music = backgroundMusicRef.current;
 
@@ -223,12 +306,14 @@ function App() {
 
   useEffect(() => {
     const music = backgroundMusicRef.current;
+    const beeLoop = beeLoopRef.current;
     const audioPools = [
       enemyKillSoundsRef.current,
       enemyHitSoundsRef.current,
       plantDeathSoundsRef.current,
       seedCrackSoundsRef.current,
       gunshotSoundsRef.current,
+      criticalScreamSoundsRef.current,
     ];
 
     audioPools.forEach((pool) => {
@@ -248,18 +333,26 @@ function App() {
 
     music.muted = !soundEnabled;
 
+    if (beeLoop) {
+      beeLoop.muted = !soundEnabled;
+    }
+
     if (!soundEnabled) {
       music.pause();
+      stopBeeLoop();
       hasStartedBackgroundMusicRef.current = false;
       return;
     }
 
     startBackgroundMusic();
+    syncBeeLoop();
   }, [soundEnabled]);
 
   useEffect(() => {
     if (plantHealth <= 0 && previousPlantHealthRef.current > 0) {
       stopBackgroundMusic();
+      hasBeeInScreenRef.current = false;
+      stopBeeLoop();
       playPlantDeathSound();
     }
 
@@ -272,19 +365,7 @@ function App() {
     }
 
     const timeoutId = window.setTimeout(() => {
-      const elapsedMs =
-        runStartRef.current === null ? 0 : performance.now() - runStartRef.current;
-
-      setGameOverStats({
-        day: hudRef.current.day,
-        maxDay: MAX_GROWTH_DAY,
-        stage: hudRef.current.stage,
-        seedsCollected: score,
-        beesPollinated: beesPollinatedRef.current,
-        pigeonAttacks:
-          pigeonAttacksRef.current + antAttacksRef.current + caterpillarAttacksRef.current,
-        survivalSeconds: elapsedMs / 1_000,
-      });
+      setGameOverStats(buildEndStats('defeat'));
     }, GAME_OVER_MODAL_DELAY_MS);
 
     return () => {
@@ -344,6 +425,23 @@ function App() {
     setPlantHealth((currentHealth) => Math.min(currentHealth + 5, MAX_PLANT_HEALTH));
   };
 
+  const handleBeePresenceChange = (hasBees: boolean) => {
+    hasBeeInScreenRef.current = hasBees;
+    syncBeeLoop();
+  };
+
+  const handleVictory = () => {
+    if (isGameOverRef.current || plantHealthRef.current <= 0) {
+      return;
+    }
+
+    isGameOverRef.current = true;
+    hasBeeInScreenRef.current = false;
+    stopBackgroundMusic();
+    stopBeeLoop();
+    setGameOverStats(buildEndStats('victory'));
+  };
+
   const handleRainCloudClick = () => {
     startBackgroundMusic();
     setHydration((currentHydration) => {
@@ -388,6 +486,8 @@ function App() {
     pigeonAttacksRef.current = 0;
     antAttacksRef.current = 0;
     caterpillarAttacksRef.current = 0;
+    hasBeeInScreenRef.current = false;
+    stopBeeLoop();
     previousPlantHealthRef.current = MAX_PLANT_HEALTH;
     plantHealthRef.current = MAX_PLANT_HEALTH;
     isGameOverRef.current = false;
@@ -432,6 +532,7 @@ function App() {
       <SunflowerCanvas
         key={runId}
         hasSeedBroken={hasSeedBroken}
+        isGameEnded={isGameOver}
         plantHealth={plantHealth}
         onSeedClick={handleSeedClick}
         onBeePollinate={handleBeePollinate}
@@ -441,6 +542,9 @@ function App() {
         onCaterpillarAttack={handleCaterpillarAttack}
         onEnemyKilled={playEnemyKillSound}
         onPigeonKilled={playGunshotSound}
+        onBeePresenceChange={handleBeePresenceChange}
+        onVictory={handleVictory}
+        onCriticalScream={playCriticalScreamSound}
         onSunflowerHeadClick={handleSunflowerHeadClick}
         onHudUpdate={setHud}
       />

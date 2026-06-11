@@ -1,6 +1,7 @@
 import type { PlantStage } from './SunflowerCanvas';
 
 export type GameOverStats = {
+  result: 'defeat' | 'victory';
   day: number;
   maxDay: number;
   stage: PlantStage;
@@ -47,6 +48,7 @@ function SeedHarvestIcon() {
 }
 
 export function GameOverModal({ stats, onRestart }: GameOverModalProps) {
+  const isVictory = stats.result === 'victory';
   const items = [
     { label: 'Dia alcanzado', value: `${stats.day} / ${stats.maxDay}` },
     { label: 'Etapa final', value: STAGE_LABELS[stats.stage] },
@@ -65,9 +67,11 @@ export function GameOverModal({ stats, onRestart }: GameOverModalProps) {
           <SeedHarvestIcon />
         </span>
         <h2 className="game-over__title" id="game-over-title">
-          Game Over
+          {isVictory ? 'Victoria' : 'Game Over'}
         </h2>
-        <p className="game-over__subtitle">Tu girasol se ha marchitado</p>
+        <p className="game-over__subtitle">
+          {isVictory ? 'Tu girasol ha sobrevivido hasta el amanecer' : 'Tu girasol se ha marchitado'}
+        </p>
 
         <dl className="game-over__stats">
           {items.map((item) => (
@@ -79,7 +83,7 @@ export function GameOverModal({ stats, onRestart }: GameOverModalProps) {
         </dl>
 
         <button type="button" className="game-over__button" onClick={onRestart} autoFocus>
-          Volver a plantar
+          {isVictory ? 'Plantar otra vez' : 'Volver a plantar'}
         </button>
       </div>
     </div>

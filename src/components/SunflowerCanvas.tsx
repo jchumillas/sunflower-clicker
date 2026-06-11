@@ -127,7 +127,6 @@ const PARTICLE_COLORS = {
   seed: ['#fff1a7', '#ffd35f', '#d98a24', '#80531c'],
 };
 export const MAX_GROWTH_DAY = 5;
-const VICTORY_ELAPSED_MS = TOTAL_CYCLE_MS * MAX_GROWTH_DAY;
 
 export type PlantStage = 'seed' | 'sprout' | 'sunflower';
 export type CyclePhase = 'day' | 'night';
@@ -2166,6 +2165,19 @@ export function SunflowerCanvas({
         .forEach((drawable) => drawable.draw());
     };
 
+    const getCycleIndex = (timestamp: number) =>
+      Math.max(0, Math.floor((timestamp - cycleStart) / TOTAL_CYCLE_MS));
+
+    const getCompletedDawnsSinceSeedBreak = (timestamp: number) => {
+      const seedBrokenAt = seedBrokenAtRef.current;
+
+      if (seedBrokenAt === null) {
+        return 0;
+      }
+
+      return Math.max(0, getCycleIndex(timestamp) - getCycleIndex(seedBrokenAt));
+    };
+
     const getPlantLifecycle = (timestamp: number): PlantLifecycle => {
       if (!hasSeedBrokenRef.current || seedBrokenAtRef.current === null) {
         return {
@@ -2175,10 +2187,9 @@ export function SunflowerCanvas({
         };
       }
 
-      const elapsed = Math.max(0, timestamp - seedBrokenAtRef.current);
-      const completedDayCycles = Math.floor(elapsed / TOTAL_CYCLE_MS);
+      const completedDawns = getCompletedDawnsSinceSeedBreak(timestamp);
 
-      if (completedDayCycles < 1) {
+      if (completedDawns < 1) {
         return {
           stage: 'sprout',
           day: 1,
@@ -2186,7 +2197,7 @@ export function SunflowerCanvas({
         };
       }
 
-      const day = Math.min(completedDayCycles + 1, MAX_GROWTH_DAY);
+      const day = Math.min(completedDawns + 1, MAX_GROWTH_DAY);
       const growthProgress = (day - 2) / (MAX_GROWTH_DAY - 2);
       const growthScale = lerp(0.42, 1, smoothStep(growthProgress));
 
@@ -2227,14 +2238,14 @@ export function SunflowerCanvas({
       const lifecycle = getPlantLifecycle(timestamp);
       const isPlantDead = plantHealthRef.current <= 0;
       const isGameEnded = isGameEndedRef.current || hasVictoryBeenEmitted;
-      const seedBrokenAt = seedBrokenAtRef.current;
+      const completedDawns = getCompletedDawnsSinceSeedBreak(timestamp);
 
       if (
         !hasVictoryBeenEmitted &&
         !isGameEndedRef.current &&
         !isPlantDead &&
-        seedBrokenAt !== null &&
-        timestamp - seedBrokenAt >= VICTORY_ELAPSED_MS
+        hasSeedBrokenRef.current &&
+        completedDawns >= MAX_GROWTH_DAY
       ) {
         hasVictoryBeenEmitted = true;
         isGameEndedRef.current = true;

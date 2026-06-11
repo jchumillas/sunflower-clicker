@@ -122,6 +122,8 @@ const GUNSHOT_SHAKE_DURATION_MS = 320;
 const PARTICLE_COUNT = 16;
 const PARTICLE_MIN_DURATION_MS = 450;
 const PARTICLE_MAX_DURATION_MS = 700;
+const ENEMY_HITBOX_SCALE = 1.25;
+const SUNFLOWER_PRODUCTION_RADIUS_MULTIPLIER = 1.75;
 const PARTICLE_COLORS = {
   enemy: ['#f8e7a6', '#f0a34b', '#c5543d', '#7a3224'],
   seed: ['#fff1a7', '#ffd35f', '#d98a24', '#80531c'],
@@ -400,6 +402,19 @@ const pointIsInside = (pointX: number, pointY: number, rect: Rect) =>
 
 const pointIsInsideCircle = (pointX: number, pointY: number, circle: Circle) =>
   Math.hypot(pointX - circle.x, pointY - circle.y) <= circle.radius;
+
+const expandHitbox = <T extends Rect>(hitbox: T, scale: number): T => {
+  const extraWidth = hitbox.width * (scale - 1);
+  const extraHeight = hitbox.height * (scale - 1);
+
+  return {
+    ...hitbox,
+    x: hitbox.x - extraWidth / 2,
+    y: hitbox.y - extraHeight / 2,
+    width: hitbox.width * scale,
+    height: hitbox.height * scale,
+  };
+};
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -1366,7 +1381,7 @@ export function SunflowerCanvas({
       sunflowerHeadHitboxRef.current = {
         x: metrics.targetX,
         y: metrics.targetY,
-        radius: metrics.targetRadius,
+        radius: metrics.targetRadius * SUNFLOWER_PRODUCTION_RADIUS_MULTIPLIER,
       };
 
       drawSpriteFrame(
@@ -1559,7 +1574,7 @@ export function SunflowerCanvas({
         );
         context.restore();
 
-        return hitbox;
+        return expandHitbox(hitbox, ENEMY_HITBOX_SCALE);
       });
     };
 
@@ -1885,7 +1900,7 @@ export function SunflowerCanvas({
           },
         });
 
-        return hitbox;
+        return expandHitbox(hitbox, ENEMY_HITBOX_SCALE);
       });
     };
 
@@ -2017,7 +2032,7 @@ export function SunflowerCanvas({
           },
         });
 
-        return hitbox;
+        return expandHitbox(hitbox, ENEMY_HITBOX_SCALE);
       });
     };
 
@@ -2129,7 +2144,7 @@ export function SunflowerCanvas({
           },
         });
 
-        return hitbox;
+        return expandHitbox(hitbox, ENEMY_HITBOX_SCALE);
       });
     };
 

@@ -30,6 +30,61 @@ body {
   height: 100vh;
 }
 
+.sound-toggle {
+  position: absolute;
+  top: clamp(14px, 2.4vw, 28px);
+  right: clamp(14px, 2.4vw, 28px);
+  z-index: 12;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  color: #3a2a12;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  border-radius: 50%;
+  background: rgba(255, 250, 238, 0.78);
+  box-shadow:
+    0 14px 34px -18px rgba(60, 38, 12, 0.62),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(12px) saturate(1.1);
+  -webkit-backdrop-filter: blur(12px) saturate(1.1);
+  transition: transform 0.15s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.sound-toggle:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 246, 224, 0.9);
+}
+
+.sound-toggle:active {
+  transform: translateY(0);
+}
+
+.sound-toggle:focus-visible {
+  outline: 3px solid #f5c542;
+  outline-offset: 3px;
+}
+
+.sound-toggle[aria-pressed='true'] {
+  color: #7a2118;
+  background: rgba(255, 231, 224, 0.86);
+}
+
+.sound-toggle svg {
+  width: 24px;
+  height: 24px;
+}
+
+.sound-toggle path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* ----------------------------- Game HUD ----------------------------- */
 .game-hud {
   --hud-accent: #f4b740;

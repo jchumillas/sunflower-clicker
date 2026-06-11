@@ -21,6 +21,9 @@ const CATERPILLAR_ATTACK_DAMAGE = 5;
 const GAME_OVER_MODAL_DELAY_MS = 900;
 const SOUND_POOL_SIZE = 4;
 const BACKGROUND_MUSIC_VOLUME = 0.28;
+const CRITICAL_HEALTH_THRESHOLD = 25;
+const NORMAL_BACKGROUND_MUSIC_RATE = 1;
+const CRITICAL_BACKGROUND_MUSIC_RATE = 1.3;
 
 const INITIAL_HUD: HudInfo = {
   day: 1,
@@ -35,6 +38,7 @@ function App() {
   const [hydration, setHydration] = useState<number | null>(null);
   const [hud, setHud] = useState<HudInfo>(INITIAL_HUD);
   const [gameOverStats, setGameOverStats] = useState<GameOverStats | null>(null);
+  const [soundEnabled, setSoundEnabled] = useState(true);
   const [runId, setRunId] = useState(0);
   const hydrationRef = useRef<number | null>(null);
   const runStartRef = useRef<number | null>(null);
@@ -90,6 +94,10 @@ function App() {
     music.loop = true;
     music.preload = 'auto';
     music.volume = BACKGROUND_MUSIC_VOLUME;
+    music.playbackRate =
+      plantHealth < CRITICAL_HEALTH_THRESHOLD
+        ? CRITICAL_BACKGROUND_MUSIC_RATE
+        : NORMAL_BACKGROUND_MUSIC_RATE;
     backgroundMusicRef.current = music;
 
     return () => {
@@ -99,11 +107,24 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const music = backgroundMusicRef.current;
+
+    if (!music) {
+      return;
+    }
+
+    music.playbackRate =
+      plantHealth < CRITICAL_HEALTH_THRESHOLD
+        ? CRITICAL_BACKGROUND_MUSIC_RATE
+        : NORMAL_BACKGROUND_MUSIC_RATE;
+  }, [plantHealth]);
+
   const playSoundFromPool = (
     pool: HTMLAudioElement[],
     indexRef: MutableRefObject<number>,
   ) => {
-    if (pool.length === 0) {
+    if (!soundEnabled || pool.length === 0) {
       return;
     }
 
@@ -131,7 +152,7 @@ function App() {
   const startBackgroundMusic = () => {
     const music = backgroundMusicRef.current;
 
-    if (!music || hasStartedBackgroundMusicRef.current) {
+    if (!music || !soundEnabled || hasStartedBackgroundMusicRef.current) {
       return;
     }
 
@@ -154,6 +175,40 @@ function App() {
       window.removeEventListener('keydown', handleFirstInteraction);
     };
   }, []);
+
+  useEffect(() => {
+    const music = backgroundMusicRef.current;
+    const audioPools = [
+      enemyKillSoundsRef.current,
+      enemyHitSoundsRef.current,
+      plantDeathSoundsRef.current,
+    ];
+
+    audioPools.forEach((pool) => {
+      pool.forEach((audio) => {
+        audio.muted = !soundEnabled;
+
+        if (!soundEnabled) {
+          audio.pause();
+          audio.currentTime = 0;
+        }
+      });
+    });
+
+    if (!music) {
+      return;
+    }
+
+    music.muted = !soundEnabled;
+
+    if (!soundEnabled) {
+      music.pause();
+      hasStartedBackgroundMusicRef.current = false;
+      return;
+    }
+
+    startBackgroundMusic();
+  }, [soundEnabled]);
 
   useEffect(() => {
     if (plantHealth <= 0 && previousPlantHealthRef.current > 0) {
@@ -288,8 +343,34 @@ function App() {
     setRunId((currentRunId) => currentRunId + 1);
   };
 
+  const toggleSound = () => {
+    setSoundEnabled((currentSoundEnabled) => !currentSoundEnabled);
+  };
+
   return (
     <main className="game-shell">
+      <button
+        type="button"
+        className="sound-toggle"
+        aria-label={soundEnabled ? 'Desactivar sonido' : 'Activar sonido'}
+        aria-pressed={!soundEnabled}
+        title={soundEnabled ? 'Desactivar sonido' : 'Activar sonido'}
+        onClick={toggleSound}
+      >
+        {soundEnabled ? (
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M4 9v6h4l5 4V5L8 9H4Z" />
+            <path d="M16 8c1.2 1.1 1.8 2.4 1.8 4s-.6 2.9-1.8 4" />
+            <path d="M18.8 5.5c2 1.8 3.2 4 3.2 6.5s-1.2 4.8-3.2 6.5" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M4 9v6h4l5 4V5L8 9H4Z" />
+            <path d="m17 9 5 5" />
+            <path d="m22 9-5 5" />
+          </svg>
+        )}
+      </button>
       <SunflowerCanvas
         key={runId}
         hasSeedBroken={hasSeedBroken}

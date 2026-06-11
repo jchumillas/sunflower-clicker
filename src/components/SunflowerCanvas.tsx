@@ -96,6 +96,7 @@ const NIGHT_DURATION_MS = 10_000;
 const TOTAL_CYCLE_MS = DAY_DURATION_MS + NIGHT_DURATION_MS;
 const DAMAGE_FLASH_DURATION_MS = 220;
 const DAMAGE_FLASH_FILTER = 'brightness(1.18) sepia(1) saturate(7) hue-rotate(315deg)';
+const CRITICAL_HEALTH_THRESHOLD = 25;
 export const MAX_GROWTH_DAY = 5;
 
 export type PlantStage = 'seed' | 'sprout' | 'sunflower';
@@ -598,6 +599,47 @@ export function SunflowerCanvas({
       context.fillRect(0, 0, canvasWidth, canvasHeight);
     };
 
+    const drawCriticalHealthVignette = (canvasWidth: number, canvasHeight: number) => {
+      const health = plantHealthRef.current;
+
+      if (health >= CRITICAL_HEALTH_THRESHOLD) {
+        return;
+      }
+
+      const intensity = clamp((CRITICAL_HEALTH_THRESHOLD - health) / CRITICAL_HEALTH_THRESHOLD, 0, 1);
+      const edgeSize = Math.min(canvasWidth, canvasHeight) * 0.22;
+      const innerColor = 'rgba(145, 0, 0, 0)';
+      const outerColor = `rgba(185, 0, 0, ${0.16 + intensity * 0.34})`;
+
+      context.save();
+
+      const topGradient = context.createLinearGradient(0, 0, 0, edgeSize);
+      topGradient.addColorStop(0, outerColor);
+      topGradient.addColorStop(1, innerColor);
+      context.fillStyle = topGradient;
+      context.fillRect(0, 0, canvasWidth, edgeSize);
+
+      const bottomGradient = context.createLinearGradient(0, canvasHeight, 0, canvasHeight - edgeSize);
+      bottomGradient.addColorStop(0, outerColor);
+      bottomGradient.addColorStop(1, innerColor);
+      context.fillStyle = bottomGradient;
+      context.fillRect(0, canvasHeight - edgeSize, canvasWidth, edgeSize);
+
+      const leftGradient = context.createLinearGradient(0, 0, edgeSize, 0);
+      leftGradient.addColorStop(0, outerColor);
+      leftGradient.addColorStop(1, innerColor);
+      context.fillStyle = leftGradient;
+      context.fillRect(0, 0, edgeSize, canvasHeight);
+
+      const rightGradient = context.createLinearGradient(canvasWidth, 0, canvasWidth - edgeSize, 0);
+      rightGradient.addColorStop(0, outerColor);
+      rightGradient.addColorStop(1, innerColor);
+      context.fillStyle = rightGradient;
+      context.fillRect(canvasWidth - edgeSize, 0, edgeSize, canvasHeight);
+
+      context.restore();
+    };
+
     const getCloudWidth = (cloud: Cloud, canvasWidth: number) => Math.max(90, canvasWidth * cloud.width);
 
     const randomizeCloud = (cloud: CloudInstance) => {
@@ -909,7 +951,12 @@ export function SunflowerCanvas({
       context.restore();
     };
 
-    const drawSprout = (canvasWidth: number, canvasHeight: number, timestamp: number) => {
+    const drawSprout = (
+      canvasWidth: number,
+      canvasHeight: number,
+      timestamp: number,
+      part: 'all' | 'soil' | 'sprout' = 'all',
+    ) => {
       seedHitboxRef.current = null;
 
       const maxDrawWidth = Math.min(canvasWidth * 0.28, 280);
@@ -933,17 +980,23 @@ export function SunflowerCanvas({
 
       context.save();
       context.filter = isDamageFlashing ? DAMAGE_FLASH_FILTER : 'none';
-      context.drawImage(soilSprite, soilX, soilY, soilWidth, soilHeight);
 
-      context.translate(sproutPivotX, sproutPivotY);
-      context.rotate(sproutSway);
-      context.drawImage(
-        sproutSprite,
-        -sproutWidth / 2,
-        -sproutHeight,
-        sproutWidth,
-        sproutHeight,
-      );
+      if (part !== 'sprout') {
+        context.drawImage(soilSprite, soilX, soilY, soilWidth, soilHeight);
+      }
+
+      if (part !== 'soil') {
+        context.translate(sproutPivotX, sproutPivotY);
+        context.rotate(sproutSway);
+        context.drawImage(
+          sproutSprite,
+          -sproutWidth / 2,
+          -sproutHeight,
+          sproutWidth,
+          sproutHeight,
+        );
+      }
+
       context.restore();
     };
 
@@ -1501,16 +1554,13 @@ export function SunflowerCanvas({
       });
     };
 
-    const drawBackgroundSunflowers = (canvasWidth: number, canvasHeight: number) => {
-      const sceneScale = getBackgroundSceneScale(canvasWidth, canvasHeight);
-
-      BACKGROUND_FLOWERS.filter(shouldDrawBackgroundFlower).forEach((flower) => {
-        drawBackgroundSunflower(flower, canvasWidth, canvasHeight, sceneScale);
-      });
-    };
-
-    const drawEnemies = (timestamp: number) => {
+    const drawLayeredBackgroundAndEnemies = (
+      canvasWidth: number,
+      canvasHeight: number,
+      timestamp: number,
+    ) => {
       const drawables: SceneDrawable[] = [];
+      const sceneScale = getBackgroundSceneScale(canvasWidth, canvasHeight);
       let order = 0;
       const getOrder = () => {
         const currentOrder = order;
@@ -1518,6 +1568,14 @@ export function SunflowerCanvas({
         order += 1;
         return currentOrder;
       };
+
+      BACKGROUND_FLOWERS.filter(shouldDrawBackgroundFlower).forEach((flower) => {
+        drawables.push({
+          depthY: canvasHeight * flower.bottom,
+          order: getOrder(),
+          draw: () => drawBackgroundSunflower(flower, canvasWidth, canvasHeight, sceneScale),
+        });
+      });
 
       queueCaterpillars(drawables, getOrder, timestamp);
       queueAnts(drawables, getOrder, timestamp);
@@ -1609,12 +1667,17 @@ export function SunflowerCanvas({
 
       context.clearRect(0, 0, canvasWidth, canvasHeight);
       drawSky(canvasWidth, canvasHeight, cycleState);
-      drawClouds(canvasWidth, canvasHeight, cycleState);
       drawCelestialPath(canvasWidth, canvasHeight, cycleState, timestamp);
+      drawClouds(canvasWidth, canvasHeight, cycleState);
       drawField(canvasWidth, canvasHeight);
       drawGroundShadow(canvasWidth, canvasHeight);
       drawRainBursts(canvasWidth, canvasHeight, timestamp);
-      drawBackgroundSunflowers(canvasWidth, canvasHeight);
+
+      if (!isPlantDead && lifecycle.stage === 'sprout') {
+        drawSprout(canvasWidth, canvasHeight, timestamp, 'soil');
+      }
+
+      drawLayeredBackgroundAndEnemies(canvasWidth, canvasHeight, timestamp);
 
       if (isPlantDead) {
         const deathGrowthScale = lifecycle.stage === 'sunflower' ? lifecycle.growthScale : 0.42;
@@ -1623,13 +1686,13 @@ export function SunflowerCanvas({
       } else if (lifecycle.stage === 'seed') {
         drawSeed(canvasWidth, canvasHeight, timestamp);
       } else if (lifecycle.stage === 'sprout') {
-        drawSprout(canvasWidth, canvasHeight, timestamp);
+        drawSprout(canvasWidth, canvasHeight, timestamp, 'sprout');
       } else {
         drawMainSunflower(canvasWidth, canvasHeight, lifecycle.growthScale, timestamp);
       }
 
-      drawEnemies(timestamp);
       drawBees(timestamp);
+      drawCriticalHealthVignette(canvasWidth, canvasHeight);
       emitHud(timestamp, cycleState, lifecycle);
     };
 

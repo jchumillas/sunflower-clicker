@@ -10,7 +10,7 @@ import seedCrackSoundUrl from './assets/sounds/crack.wav';
 import plantDeathSoundUrl from './assets/sounds/scream.wav';
 import gunshotSoundUrl from './assets/sounds/gunshot.mp3';
 
-const SEED_CLICKS_TO_SPROUT = 10;
+const SEED_CLICKS_TO_SPROUT = 30;
 const MAX_PLANT_HEALTH = 100;
 const MAX_HYDRATION = 100;
 const INITIAL_HYDRATION = 50;

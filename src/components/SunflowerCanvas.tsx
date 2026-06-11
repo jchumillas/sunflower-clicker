@@ -78,7 +78,8 @@ const ANT_FRAME_DURATION_MS = 50;
 const ANT_SPAWN_INTERVAL_MS = 2_000;
 const ANT_MIN_SPEED = 24;
 const ANT_MAX_SPEED = 36;
-const RAIN_CLOUD_CHANCE = 0.3;
+const BUG_DAILY_DIFFICULTY_STEP = 0.1;
+const RAIN_CLOUD_CHANCE = 0.5;
 const RAIN_BURST_DURATION_MS = 1_200;
 const RAIN_STREAK_COUNT = 42;
 const RAIN_HYDRATION_MIN_SCREEN_PERCENT = 0.3;
@@ -417,6 +418,10 @@ const getRandomPigeonSpawnDelay = () =>
 const getRandomCaterpillarSpawnDelay = () =>
   CATERPILLAR_MIN_SPAWN_DELAY_MS +
   Math.random() * (CATERPILLAR_MAX_SPAWN_DELAY_MS - CATERPILLAR_MIN_SPAWN_DELAY_MS);
+
+const getDailyBugMultiplier = (day: number) => 1 + Math.max(0, day - 1) * BUG_DAILY_DIFFICULTY_STEP;
+
+const scaleBugSpawnDelay = (delayMs: number, multiplier: number) => delayMs / multiplier;
 
 const getSeededNoise = (seed: number, index: number) => {
   const value = Math.sin(seed * 41.37 + index * 12.9898) * 43_758.5453;
@@ -1796,7 +1801,11 @@ export function SunflowerCanvas({
       radius: Math.max(22, Math.min(canvasWidth, canvasHeight) * 0.045),
     });
 
-    const spawnCaterpillar = (canvasWidth: number, canvasHeight: number) => {
+    const spawnCaterpillar = (
+      canvasWidth: number,
+      canvasHeight: number,
+      speedMultiplier: number,
+    ) => {
       const side: -1 | 1 = Math.random() < 0.5 ? -1 : 1;
       const width = clamp(canvasWidth * 0.105, 76, 128);
       const rowOffset = (Math.random() - 0.5) * Math.max(14, canvasHeight * 0.035);
@@ -1809,8 +1818,9 @@ export function SunflowerCanvas({
         baseY,
         progressY: 0,
         speed:
-          CATERPILLAR_MIN_SPEED +
-          Math.random() * (CATERPILLAR_MAX_SPEED - CATERPILLAR_MIN_SPEED),
+          (CATERPILLAR_MIN_SPEED +
+            Math.random() * (CATERPILLAR_MAX_SPEED - CATERPILLAR_MIN_SPEED)) *
+          speedMultiplier,
         width,
         side,
         phase: Math.random() * Math.PI * 2,
@@ -1834,13 +1844,17 @@ export function SunflowerCanvas({
         return;
       }
 
+      const bugMultiplier = getDailyBugMultiplier(lifecycle.day);
+
       if (!Number.isFinite(nextCaterpillarSpawnAt)) {
-        nextCaterpillarSpawnAt = timestamp + getRandomCaterpillarSpawnDelay();
+        nextCaterpillarSpawnAt =
+          timestamp + scaleBugSpawnDelay(getRandomCaterpillarSpawnDelay(), bugMultiplier);
       }
 
       if (timestamp >= nextCaterpillarSpawnAt) {
-        spawnCaterpillar(canvasWidth, canvasHeight);
-        nextCaterpillarSpawnAt = timestamp + getRandomCaterpillarSpawnDelay();
+        spawnCaterpillar(canvasWidth, canvasHeight, bugMultiplier);
+        nextCaterpillarSpawnAt =
+          timestamp + scaleBugSpawnDelay(getRandomCaterpillarSpawnDelay(), bugMultiplier);
       }
 
       const target = getAntTarget(canvasWidth, canvasHeight);
@@ -1913,7 +1927,7 @@ export function SunflowerCanvas({
       });
     };
 
-    const spawnAnt = (canvasWidth: number, canvasHeight: number) => {
+    const spawnAnt = (canvasWidth: number, canvasHeight: number, speedMultiplier: number) => {
       const side: -1 | 1 = Math.random() < 0.5 ? -1 : 1;
       const size = clamp(canvasWidth * 0.055, 32, 56);
       const rowStep = Math.max(6, canvasHeight * 0.012);
@@ -1927,7 +1941,9 @@ export function SunflowerCanvas({
         x,
         baseY,
         progressY: 0,
-        speed: ANT_MIN_SPEED + Math.random() * (ANT_MAX_SPEED - ANT_MIN_SPEED),
+        speed:
+          (ANT_MIN_SPEED + Math.random() * (ANT_MAX_SPEED - ANT_MIN_SPEED)) *
+          speedMultiplier,
         size,
         side,
         rowOffset,
@@ -1936,17 +1952,24 @@ export function SunflowerCanvas({
       nextAntId += 1;
     };
 
-    const updateAnts = (canvasWidth: number, canvasHeight: number, timestamp: number) => {
+    const updateAnts = (
+      canvasWidth: number,
+      canvasHeight: number,
+      timestamp: number,
+      lifecycle: PlantLifecycle,
+    ) => {
       const elapsedSeconds = lastAntUpdateTime === 0 ? 0 : (timestamp - lastAntUpdateTime) / 1_000;
       lastAntUpdateTime = timestamp;
+      const bugMultiplier = getDailyBugMultiplier(lifecycle.day);
+      const antSpawnInterval = scaleBugSpawnDelay(ANT_SPAWN_INTERVAL_MS, bugMultiplier);
 
       if (!Number.isFinite(nextAntSpawnAt)) {
-        nextAntSpawnAt = timestamp + ANT_SPAWN_INTERVAL_MS;
+        nextAntSpawnAt = timestamp + antSpawnInterval;
       }
 
       if (timestamp >= nextAntSpawnAt) {
-        spawnAnt(canvasWidth, canvasHeight);
-        nextAntSpawnAt = timestamp + ANT_SPAWN_INTERVAL_MS;
+        spawnAnt(canvasWidth, canvasHeight, bugMultiplier);
+        nextAntSpawnAt = timestamp + antSpawnInterval;
       }
 
       const target = getAntTarget(canvasWidth, canvasHeight);
@@ -2131,7 +2154,7 @@ export function SunflowerCanvas({
         updateBees(canvasWidth, canvasHeight, timestamp, cycleState, lifecycle);
         updatePigeons(canvasWidth, canvasHeight, timestamp, lifecycle);
         updateCaterpillars(canvasWidth, canvasHeight, timestamp, lifecycle);
-        updateAnts(canvasWidth, canvasHeight, timestamp);
+        updateAnts(canvasWidth, canvasHeight, timestamp, lifecycle);
         updateEffects(canvasWidth, canvasHeight, timestamp);
       }
 

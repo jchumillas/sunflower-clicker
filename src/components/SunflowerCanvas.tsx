@@ -1,6 +1,10 @@
 import { useEffect, useRef } from 'react';
 import type { KeyboardEvent, PointerEvent } from 'react';
+import beeSpriteUrl from '../assets/bee/bee.png';
+import moonSpriteUrl from '../assets/moon/moon.png';
 import seedSpriteUrl from '../assets/seed.png';
+import soilSpriteUrl from '../assets/soil.png';
+import sproutSpriteUrl from '../assets/sprout.png';
 import sunCrownUrl from '../assets/sun/crown.png';
 import sunFaceUrl from '../assets/sun/face.png';
 import sunflowerSpriteUrl from '../assets/idle_happy.png';
@@ -13,18 +17,34 @@ const MAIN_FRAME_WIDTH = 360;
 const MAIN_FRAME_HEIGHT = 527;
 const BACKGROUND_FRAME_WIDTH = 400;
 const BACKGROUND_FRAME_HEIGHT = 351;
+const SOIL_WIDTH = 300;
+const SOIL_HEIGHT = 113;
+const SPROUT_WIDTH = 256;
+const SPROUT_HEIGHT = 243;
+const MOON_WIDTH = 256;
+const MOON_HEIGHT = 270;
+const BEE_FRAME_WIDTH = 256;
+const BEE_FRAME_HEIGHT = 256;
+const BEE_FRAME_COUNT = 2;
+const BEE_FRAME_DURATION_MS = 50;
+const BEE_MIN_SPAWN_DELAY_MS = 5_000;
+const BEE_MAX_SPAWN_DELAY_MS = 10_000;
 const FRAME_DURATION_MS = 75;
 const SEED_WIDTH = 128;
 const SEED_HEIGHT = 178;
-const DAY_DURATION_MS = 60_000;
-const NIGHT_DURATION_MS = 60_000;
+const DAY_DURATION_MS = 10_000;
+const NIGHT_DURATION_MS = 10_000;
 const TOTAL_CYCLE_MS = DAY_DURATION_MS + NIGHT_DURATION_MS;
+const MAX_GROWTH_DAY = 5;
 
 type SunflowerCanvasProps = {
-  hasSprouted: boolean;
+  hasSeedBroken: boolean;
   seedClicks: number;
   seedClicksToSprout: number;
+  plantHealth: number;
+  maxPlantHealth: number;
   onSeedClick: () => void;
+  onBeePollinate: () => void;
 };
 
 type Rect = {
@@ -46,17 +66,68 @@ type CycleState = {
   cycleElapsed: number;
 };
 
+type PlantLifecycle =
+  | {
+      stage: 'seed';
+      day: 1;
+      growthScale: 0;
+    }
+  | {
+      stage: 'sprout';
+      day: 1;
+      growthScale: 0;
+    }
+  | {
+      stage: 'sunflower';
+      day: number;
+      growthScale: number;
+    };
+
+type Bee = {
+  id: number;
+  x: number;
+  y: number;
+  speed: number;
+  size: number;
+  wobble: number;
+  side: -1 | 1;
+};
+
 const BACKGROUND_FLOWERS = [
-  { x: 0.08, bottom: 0.78, scale: 0.42, phase: 1, opacity: 0.7 },
-  { x: 0.2, bottom: 0.58, scale: 0.33, phase: 6, opacity: 0.58 },
-  { x: 0.34, bottom: 0.7, scale: 0.28, phase: 11, opacity: 0.52 },
-  { x: 0.66, bottom: 0.7, scale: 0.28, phase: 15, opacity: 0.52 },
-  { x: 0.8, bottom: 0.58, scale: 0.33, phase: 4, opacity: 0.58 },
-  { x: 0.92, bottom: 0.78, scale: 0.42, phase: 9, opacity: 0.7 },
-  { x: 0.16, bottom: 0.95, scale: 0.5, phase: 13, opacity: 0.86 },
-  { x: 0.84, bottom: 0.95, scale: 0.5, phase: 18, opacity: 0.86 },
-  { x: 0.04, bottom: 0.52, scale: 0.26, phase: 2, opacity: 0.45 },
-  { x: 0.96, bottom: 0.52, scale: 0.26, phase: 7, opacity: 0.45 },
+  { x: 0.03, bottom: 0.59, scale: 0.18, phase: 2, brightness: 0.62 },
+  { x: 0.13, bottom: 0.61, scale: 0.2, phase: 6, brightness: 0.64 },
+  { x: 0.24, bottom: 0.58, scale: 0.19, phase: 10, brightness: 0.62 },
+  { x: 0.36, bottom: 0.62, scale: 0.2, phase: 14, brightness: 0.66 },
+  { x: 0.49, bottom: 0.6, scale: 0.18, phase: 18, brightness: 0.63 },
+  { x: 0.61, bottom: 0.62, scale: 0.2, phase: 4, brightness: 0.66 },
+  { x: 0.74, bottom: 0.58, scale: 0.19, phase: 8, brightness: 0.62 },
+  { x: 0.86, bottom: 0.61, scale: 0.2, phase: 12, brightness: 0.64 },
+  { x: 0.97, bottom: 0.59, scale: 0.18, phase: 16, brightness: 0.62 },
+  { x: 0.08, bottom: 0.69, scale: 0.27, phase: 1, brightness: 0.76 },
+  { x: 0.19, bottom: 0.72, scale: 0.3, phase: 5, brightness: 0.8 },
+  { x: 0.31, bottom: 0.68, scale: 0.27, phase: 9, brightness: 0.76 },
+  { x: 0.43, bottom: 0.74, scale: 0.31, phase: 13, brightness: 0.82 },
+  { x: 0.57, bottom: 0.74, scale: 0.31, phase: 17, brightness: 0.82 },
+  { x: 0.69, bottom: 0.68, scale: 0.27, phase: 0, brightness: 0.76 },
+  { x: 0.81, bottom: 0.72, scale: 0.3, phase: 3, brightness: 0.8 },
+  { x: 0.92, bottom: 0.69, scale: 0.27, phase: 7, brightness: 0.76 },
+  { x: 0.01, bottom: 0.82, scale: 0.36, phase: 11, brightness: 0.9 },
+  { x: 0.12, bottom: 0.86, scale: 0.39, phase: 15, brightness: 0.94 },
+  { x: 0.25, bottom: 0.81, scale: 0.35, phase: 19, brightness: 0.88 },
+  { x: 0.37, bottom: 0.87, scale: 0.4, phase: 2, brightness: 0.95 },
+  { x: 0.5, bottom: 0.83, scale: 0.36, phase: 6, brightness: 0.9 },
+  { x: 0.63, bottom: 0.87, scale: 0.4, phase: 10, brightness: 0.95 },
+  { x: 0.75, bottom: 0.81, scale: 0.35, phase: 14, brightness: 0.88 },
+  { x: 0.88, bottom: 0.86, scale: 0.39, phase: 18, brightness: 0.94 },
+  { x: 0.99, bottom: 0.82, scale: 0.36, phase: 4, brightness: 0.9 },
+  { x: 0.05, bottom: 0.96, scale: 0.5, phase: 8, brightness: 1 },
+  { x: 0.18, bottom: 0.93, scale: 0.45, phase: 12, brightness: 1 },
+  { x: 0.31, bottom: 0.98, scale: 0.52, phase: 16, brightness: 1 },
+  { x: 0.44, bottom: 0.94, scale: 0.46, phase: 1, brightness: 1 },
+  { x: 0.56, bottom: 0.94, scale: 0.46, phase: 5, brightness: 1 },
+  { x: 0.69, bottom: 0.98, scale: 0.52, phase: 9, brightness: 1 },
+  { x: 0.82, bottom: 0.93, scale: 0.45, phase: 13, brightness: 1 },
+  { x: 0.95, bottom: 0.96, scale: 0.5, phase: 17, brightness: 1 },
 ];
 
 const SKY_COLORS = {
@@ -93,6 +164,9 @@ const lerpColor = (start: Rgb, end: Rgb, amount: number): Rgb => ({
 });
 
 const colorToCss = (color: Rgb) => `rgb(${color.r}, ${color.g}, ${color.b})`;
+
+const getRandomBeeSpawnDelay = () =>
+  BEE_MIN_SPAWN_DELAY_MS + Math.random() * (BEE_MAX_SPAWN_DELAY_MS - BEE_MIN_SPAWN_DELAY_MS);
 
 const getCycleState = (timestamp: number, cycleStart: number): CycleState => {
   const cycleElapsed = (timestamp - cycleStart) % TOTAL_CYCLE_MS;
@@ -153,35 +227,49 @@ const getSkyColors = ({ isDay, progress }: CycleState) => {
   };
 };
 
-const getNightSkyColorAt = (y: number, canvasHeight: number) => {
-  const amount = clamp(y / (canvasHeight * 0.62), 0, 1);
-
-  return lerpColor(SKY_COLORS.nightTop, SKY_COLORS.nightBottom, amount);
-};
-
 export function SunflowerCanvas({
-  hasSprouted,
+  hasSeedBroken,
   seedClicks,
   seedClicksToSprout,
+  plantHealth,
+  maxPlantHealth,
   onSeedClick,
+  onBeePollinate,
 }: SunflowerCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const seedHitboxRef = useRef<Rect | null>(null);
-  const hasSproutedRef = useRef(hasSprouted);
+  const beesRef = useRef<Bee[]>([]);
+  const beeHitboxesRef = useRef<Array<Rect & { id: number }>>([]);
+  const hasSeedBrokenRef = useRef(hasSeedBroken);
+  const seedBrokenAtRef = useRef<number | null>(null);
   const seedClicksRef = useRef(seedClicks);
+  const plantHealthRef = useRef(plantHealth);
   const onSeedClickRef = useRef(onSeedClick);
+  const onBeePollinateRef = useRef(onBeePollinate);
 
   useEffect(() => {
-    hasSproutedRef.current = hasSprouted;
-  }, [hasSprouted]);
+    hasSeedBrokenRef.current = hasSeedBroken;
+
+    if (hasSeedBroken && seedBrokenAtRef.current === null) {
+      seedBrokenAtRef.current = performance.now();
+    }
+  }, [hasSeedBroken]);
 
   useEffect(() => {
     seedClicksRef.current = seedClicks;
   }, [seedClicks]);
 
   useEffect(() => {
+    plantHealthRef.current = plantHealth;
+  }, [plantHealth]);
+
+  useEffect(() => {
     onSeedClickRef.current = onSeedClick;
   }, [onSeedClick]);
+
+  useEffect(() => {
+    onBeePollinateRef.current = onBeePollinate;
+  }, [onBeePollinate]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -202,16 +290,28 @@ export function SunflowerCanvas({
     let loadedImages = 0;
     let isMounted = true;
     let cycleStart = 0;
+    let lastBeeUpdateTime = 0;
+    let nextBeeSpawnAt = Number.POSITIVE_INFINITY;
+    let nextBeeId = 1;
+    const bees = beesRef.current;
 
+    const beeSprite = new Image();
     const mainSunflowerSprite = new Image();
     const backgroundSunflowerSprite = new Image();
     const seedSprite = new Image();
+    const soilSprite = new Image();
+    const sproutSprite = new Image();
+    const moonSprite = new Image();
     const sunFaceSprite = new Image();
     const sunCrownSprite = new Image();
     const sprites = [
+      beeSprite,
       mainSunflowerSprite,
       backgroundSunflowerSprite,
       seedSprite,
+      soilSprite,
+      sproutSprite,
+      moonSprite,
       sunFaceSprite,
       sunCrownSprite,
     ];
@@ -257,12 +357,12 @@ export function SunflowerCanvas({
         return;
       }
 
-      drawMoon(x, y, bodySize * 0.74, canvasHeight);
+      drawMoon(x, y, bodySize * 0.74);
     };
 
     const drawSun = (centerX: number, centerY: number, size: number, timestamp: number) => {
       const crownHeight = size * (241 / 256);
-      const crownRotation = Math.sin(timestamp / 2_200) * 0.16;
+      const crownRotation = Math.sin(timestamp / (2_200 / 3)) * 0.16;
 
       context.save();
       context.translate(centerX, centerY);
@@ -273,23 +373,16 @@ export function SunflowerCanvas({
       context.drawImage(sunFaceSprite, centerX - size / 2, centerY - size / 2, size, size);
     };
 
-    const drawMoon = (centerX: number, centerY: number, size: number, canvasHeight: number) => {
-      context.save();
-      context.fillStyle = 'rgba(255, 248, 213, 0.2)';
-      context.beginPath();
-      context.arc(centerX - size * 0.05, centerY, size * 0.68, 0, Math.PI * 2);
-      context.fill();
+    const drawMoon = (centerX: number, centerY: number, size: number) => {
+      const moonHeight = size * (MOON_HEIGHT / MOON_WIDTH);
 
-      context.fillStyle = 'rgb(239, 235, 205)';
-      context.beginPath();
-      context.arc(centerX, centerY, size / 2, 0, Math.PI * 2);
-      context.fill();
-
-      context.fillStyle = colorToCss(getNightSkyColorAt(centerY, canvasHeight));
-      context.beginPath();
-      context.arc(centerX + size * 0.2, centerY - size * 0.06, size / 2, 0, Math.PI * 2);
-      context.fill();
-      context.restore();
+      context.drawImage(
+        moonSprite,
+        centerX - size / 2,
+        centerY - moonHeight / 2,
+        size,
+        moonHeight,
+      );
     };
 
     const drawField = (canvasWidth: number, canvasHeight: number) => {
@@ -331,13 +424,15 @@ export function SunflowerCanvas({
       frame: number,
       frameWidth: number,
       frameHeight: number,
+      frameColumns: number,
       centerX: number,
       bottomY: number,
       scale: number,
       opacity = 1,
+      brightness = 1,
     ) => {
-      const column = frame % COLUMNS;
-      const row = Math.floor(frame / COLUMNS);
+      const column = frame % frameColumns;
+      const row = Math.floor(frame / frameColumns);
       const sourceX = column * frameWidth;
       const sourceY = row * frameHeight;
       const drawWidth = frameWidth * scale;
@@ -345,7 +440,9 @@ export function SunflowerCanvas({
       const drawX = centerX - drawWidth / 2;
       const drawY = bottomY - drawHeight;
 
+      context.save();
       context.globalAlpha = opacity;
+      context.filter = `brightness(${brightness})`;
       context.drawImage(
         sprite,
         sourceX,
@@ -357,13 +454,12 @@ export function SunflowerCanvas({
         drawWidth,
         drawHeight,
       );
-      context.globalAlpha = 1;
+      context.restore();
     };
 
-    const drawBackgroundSunflowers = (canvasWidth: number, canvasHeight: number, cycleState: CycleState) => {
+    const drawBackgroundSunflowers = (canvasWidth: number, canvasHeight: number) => {
       const responsiveScale = Math.min(canvasWidth / 1100, canvasHeight / 720);
       const sceneScale = Math.min(1.22, Math.max(0.7, responsiveScale));
-      const nightDim = cycleState.isDay ? 1 : 0.64;
 
       BACKGROUND_FLOWERS.forEach((flower) => {
         drawSpriteFrame(
@@ -371,19 +467,24 @@ export function SunflowerCanvas({
           (currentFrame + flower.phase) % TOTAL_FRAMES,
           BACKGROUND_FRAME_WIDTH,
           BACKGROUND_FRAME_HEIGHT,
+          COLUMNS,
           canvasWidth * flower.x,
           canvasHeight * flower.bottom,
           flower.scale * sceneScale,
-          flower.opacity * nightDim,
+          1,
+          flower.brightness,
         );
       });
     };
 
-    const drawSeed = (canvasWidth: number, canvasHeight: number) => {
+    const drawSeed = (canvasWidth: number, canvasHeight: number, timestamp: number) => {
       const seedHeight = Math.min(canvasHeight * 0.22, 178);
       const seedWidth = (seedHeight / SEED_HEIGHT) * SEED_WIDTH;
       const drawX = (canvasWidth - seedWidth) / 2;
       const drawY = canvasHeight * 0.78 - seedHeight / 2;
+      const pivotX = drawX + seedWidth / 2;
+      const pivotY = drawY + seedHeight * 0.9;
+      const seedSway = Math.sin(timestamp / 380) * 0.08;
 
       seedHitboxRef.current = {
         x: drawX,
@@ -392,41 +493,254 @@ export function SunflowerCanvas({
         height: seedHeight,
       };
 
-      context.drawImage(seedSprite, drawX, drawY, seedWidth, seedHeight);
+      context.save();
+      context.translate(pivotX, pivotY);
+      context.rotate(seedSway);
+      context.drawImage(
+        seedSprite,
+        -seedWidth / 2,
+        -seedHeight * 0.9,
+        seedWidth,
+        seedHeight,
+      );
+      context.restore();
     };
 
-    const drawMainSunflower = (canvasWidth: number, canvasHeight: number) => {
+    const drawSprout = (canvasWidth: number, canvasHeight: number, timestamp: number) => {
       seedHitboxRef.current = null;
 
+      const maxDrawWidth = Math.min(canvasWidth * 0.28, 280);
+      const maxDrawHeight = canvasHeight * 0.34;
+      const scale = Math.min(
+        maxDrawWidth / SOIL_WIDTH,
+        maxDrawHeight / (SPROUT_HEIGHT + SOIL_HEIGHT * 0.62),
+      ) * 0.5;
+      const centerX = canvasWidth / 2;
+      const soilWidth = SOIL_WIDTH * scale;
+      const soilHeight = SOIL_HEIGHT * scale;
+      const sproutWidth = SPROUT_WIDTH * scale;
+      const sproutHeight = SPROUT_HEIGHT * scale;
+      const soilBottomY = canvasHeight * 0.89;
+      const soilX = centerX - soilWidth / 2;
+      const soilY = soilBottomY - soilHeight;
+      const sproutPivotX = centerX;
+      const sproutPivotY = soilY + soilHeight * 0.33;
+      const sproutSway = Math.sin(timestamp / 460) * 0.055;
+
+      context.drawImage(soilSprite, soilX, soilY, soilWidth, soilHeight);
+
+      context.save();
+      context.translate(sproutPivotX, sproutPivotY);
+      context.rotate(sproutSway);
+      context.drawImage(
+        sproutSprite,
+        -sproutWidth / 2,
+        -sproutHeight,
+        sproutWidth,
+        sproutHeight,
+      );
+      context.restore();
+    };
+
+    const getSunflowerMetrics = (canvasWidth: number, canvasHeight: number, growthScale: number) => {
       const maxDrawWidth = canvasWidth * 0.34;
       const maxDrawHeight = canvasHeight * 0.58;
-      const scale = Math.min(maxDrawWidth / MAIN_FRAME_WIDTH, maxDrawHeight / MAIN_FRAME_HEIGHT);
+      const fullScale = Math.min(maxDrawWidth / MAIN_FRAME_WIDTH, maxDrawHeight / MAIN_FRAME_HEIGHT);
+      const scale = fullScale * growthScale;
+      const bottomY = canvasHeight * 0.9;
+
+      return {
+        scale,
+        bottomY,
+        targetX: canvasWidth / 2,
+        targetY: bottomY - MAIN_FRAME_HEIGHT * scale * 0.76,
+        targetRadius: Math.max(24, 58 * scale),
+      };
+    };
+
+    const drawMainSunflower = (canvasWidth: number, canvasHeight: number, growthScale: number) => {
+      seedHitboxRef.current = null;
+      const metrics = getSunflowerMetrics(canvasWidth, canvasHeight, growthScale);
 
       drawSpriteFrame(
         mainSunflowerSprite,
         currentFrame,
         MAIN_FRAME_WIDTH,
         MAIN_FRAME_HEIGHT,
+        COLUMNS,
         canvasWidth / 2,
-        canvasHeight * 0.9,
-        scale,
+        metrics.bottomY,
+        metrics.scale,
       );
     };
 
-    const drawHud = (canvasWidth: number, cycleState: CycleState) => {
+    const spawnBee = (canvasWidth: number, canvasHeight: number, targetY: number) => {
+      const side: -1 | 1 = Math.random() < 0.5 ? -1 : 1;
+      const size = Math.min(Math.max(canvasWidth * 0.075, 42), 74);
+      const x = side === -1 ? -size : canvasWidth + size;
+      const y = clamp(
+        targetY + (Math.random() - 0.5) * canvasHeight * 0.34,
+        canvasHeight * 0.18,
+        canvasHeight * 0.82,
+      );
+
+      bees.push({
+        id: nextBeeId,
+        x,
+        y,
+        speed: 55 + Math.random() * 35,
+        size,
+        wobble: Math.random() * Math.PI * 2,
+        side,
+      });
+      nextBeeId += 1;
+    };
+
+    const updateBees = (
+      canvasWidth: number,
+      canvasHeight: number,
+      timestamp: number,
+      cycleState: CycleState,
+      lifecycle: PlantLifecycle,
+    ) => {
+      const elapsedSeconds = lastBeeUpdateTime === 0 ? 0 : (timestamp - lastBeeUpdateTime) / 1_000;
+      lastBeeUpdateTime = timestamp;
+
+      if (lifecycle.stage !== 'sunflower' || !cycleState.isDay) {
+        bees.splice(0);
+        nextBeeSpawnAt = Number.POSITIVE_INFINITY;
+        return;
+      }
+
+      const sunflowerMetrics = getSunflowerMetrics(canvasWidth, canvasHeight, lifecycle.growthScale);
+
+      if (!Number.isFinite(nextBeeSpawnAt)) {
+        nextBeeSpawnAt = timestamp + getRandomBeeSpawnDelay();
+      }
+
+      if (timestamp >= nextBeeSpawnAt) {
+        spawnBee(canvasWidth, canvasHeight, sunflowerMetrics.targetY);
+        nextBeeSpawnAt = timestamp + getRandomBeeSpawnDelay();
+      }
+
+      for (let index = bees.length - 1; index >= 0; index -= 1) {
+        const bee = bees[index];
+        const dx = sunflowerMetrics.targetX - bee.x;
+        const dy = sunflowerMetrics.targetY - bee.y;
+        const distance = Math.hypot(dx, dy);
+
+        if (distance <= sunflowerMetrics.targetRadius) {
+          bees.splice(index, 1);
+          onBeePollinateRef.current();
+          continue;
+        }
+
+        if (distance > 0) {
+          bee.x += (dx / distance) * bee.speed * elapsedSeconds;
+          bee.y += (dy / distance) * bee.speed * elapsedSeconds;
+        }
+      }
+    };
+
+    const drawBees = (timestamp: number) => {
+      const beeFrame = Math.floor(timestamp / BEE_FRAME_DURATION_MS) % BEE_FRAME_COUNT;
+
+      beeHitboxesRef.current = bees.map((bee) => {
+        const hoverY = Math.sin(timestamp / 210 + bee.wobble) * 8;
+        const drawSize = bee.size;
+        const drawX = bee.x - drawSize / 2;
+        const drawY = bee.y + hoverY - drawSize / 2;
+        const hitbox = {
+          id: bee.id,
+          x: drawX,
+          y: drawY,
+          width: drawSize,
+          height: drawSize,
+        };
+        const shouldFlip = bee.side === -1;
+
+        context.save();
+        context.translate(bee.x, bee.y + hoverY);
+
+        if (shouldFlip) {
+          context.scale(-1, 1);
+        }
+
+        context.drawImage(
+          beeSprite,
+          beeFrame * BEE_FRAME_WIDTH,
+          0,
+          BEE_FRAME_WIDTH,
+          BEE_FRAME_HEIGHT,
+          -drawSize / 2,
+          -drawSize / 2,
+          drawSize,
+          drawSize,
+        );
+        context.restore();
+
+        return hitbox;
+      });
+    };
+
+    const getPlantLifecycle = (timestamp: number): PlantLifecycle => {
+      if (!hasSeedBrokenRef.current || seedBrokenAtRef.current === null) {
+        return {
+          stage: 'seed',
+          day: 1,
+          growthScale: 0,
+        };
+      }
+
+      const elapsed = Math.max(0, timestamp - seedBrokenAtRef.current);
+      const completedDayCycles = Math.floor(elapsed / TOTAL_CYCLE_MS);
+
+      if (completedDayCycles < 1) {
+        return {
+          stage: 'sprout',
+          day: 1,
+          growthScale: 0,
+        };
+      }
+
+      const day = Math.min(completedDayCycles + 1, MAX_GROWTH_DAY);
+      const growthProgress = (day - 2) / (MAX_GROWTH_DAY - 2);
+      const growthScale = lerp(0.42, 1, smoothStep(growthProgress));
+
+      return {
+        stage: 'sunflower',
+        day,
+        growthScale,
+      };
+    };
+
+    const drawHud = (canvasWidth: number, cycleState: CycleState, lifecycle: PlantLifecycle) => {
       const padding = Math.max(14, Math.min(canvasWidth * 0.02, 24));
       const lineHeight = 26;
-      const status = hasSproutedRef.current
-        ? 'Estado: feliz'
-        : `Pipa: ${seedClicksRef.current}/${seedClicksToSprout}`;
+      const healthBarWidth = 168;
+      const healthBarHeight = 12;
+      const healthBarY = padding + lineHeight * 3 + 6;
+      const healthAmount = clamp(plantHealthRef.current / maxPlantHealth, 0, 1);
+      const status =
+        lifecycle.stage === 'seed'
+          ? `Pipa: ${seedClicksRef.current}/${seedClicksToSprout}`
+          : lifecycle.stage === 'sprout'
+            ? 'Brote: sobreviviendo'
+            : `Girasol: dia ${lifecycle.day}/${MAX_GROWTH_DAY}`;
 
       context.save();
       context.font = '700 16px Inter, system-ui, sans-serif';
       context.textBaseline = 'top';
       context.fillStyle = cycleState.isDay ? 'rgba(37, 49, 29, 0.82)' : 'rgba(236, 242, 255, 0.86)';
-      context.fillText('Dia 1', padding, padding);
+      context.fillText(`Dia ${lifecycle.day}`, padding, padding);
       context.fillText(status, padding, padding + lineHeight);
       context.fillText('Retos: proximamente', padding, padding + lineHeight * 2);
+      context.fillText(`Vida: ${plantHealthRef.current}/${maxPlantHealth}`, padding, padding + lineHeight * 3);
+
+      context.fillStyle = cycleState.isDay ? 'rgba(37, 49, 29, 0.25)' : 'rgba(236, 242, 255, 0.22)';
+      context.fillRect(padding, healthBarY, healthBarWidth, healthBarHeight);
+      context.fillStyle = healthAmount > 0.32 ? 'rgb(70, 184, 79)' : 'rgb(219, 75, 58)';
+      context.fillRect(padding, healthBarY, healthBarWidth * healthAmount, healthBarHeight);
       context.restore();
     };
 
@@ -434,21 +748,27 @@ export function SunflowerCanvas({
       const canvasWidth = window.innerWidth;
       const canvasHeight = window.innerHeight;
       const cycleState = getCycleState(timestamp, cycleStart);
+      const lifecycle = getPlantLifecycle(timestamp);
+
+      updateBees(canvasWidth, canvasHeight, timestamp, cycleState, lifecycle);
 
       context.clearRect(0, 0, canvasWidth, canvasHeight);
       drawSky(canvasWidth, canvasHeight, cycleState);
       drawCelestialPath(canvasWidth, canvasHeight, cycleState, timestamp);
       drawField(canvasWidth, canvasHeight);
-      drawBackgroundSunflowers(canvasWidth, canvasHeight, cycleState);
+      drawBackgroundSunflowers(canvasWidth, canvasHeight);
       drawGroundShadow(canvasWidth, canvasHeight);
 
-      if (hasSproutedRef.current) {
-        drawMainSunflower(canvasWidth, canvasHeight);
+      if (lifecycle.stage === 'seed') {
+        drawSeed(canvasWidth, canvasHeight, timestamp);
+      } else if (lifecycle.stage === 'sprout') {
+        drawSprout(canvasWidth, canvasHeight, timestamp);
       } else {
-        drawSeed(canvasWidth, canvasHeight);
+        drawMainSunflower(canvasWidth, canvasHeight, lifecycle.growthScale);
       }
 
-      drawHud(canvasWidth, cycleState);
+      drawBees(timestamp);
+      drawHud(canvasWidth, cycleState, lifecycle);
     };
 
     const animate = (timestamp: number) => {
@@ -484,13 +804,18 @@ export function SunflowerCanvas({
     window.addEventListener('resize', resizeCanvas);
     sprites.forEach((sprite) => sprite.addEventListener('load', handleSpriteLoad));
     mainSunflowerSprite.src = sunflowerSpriteUrl;
+    beeSprite.src = beeSpriteUrl;
     backgroundSunflowerSprite.src = backgroundSunflowerSpriteUrl;
     seedSprite.src = seedSpriteUrl;
+    soilSprite.src = soilSpriteUrl;
+    sproutSprite.src = sproutSpriteUrl;
+    moonSprite.src = moonSpriteUrl;
     sunFaceSprite.src = sunFaceUrl;
     sunCrownSprite.src = sunCrownUrl;
 
     return () => {
       isMounted = false;
+      bees.splice(0);
       window.cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', resizeCanvas);
       sprites.forEach((sprite) => sprite.removeEventListener('load', handleSpriteLoad));
@@ -501,13 +826,31 @@ export function SunflowerCanvas({
     const canvas = canvasRef.current;
     const seedHitbox = seedHitboxRef.current;
 
-    if (!canvas || hasSprouted || !seedHitbox) {
+    if (!canvas) {
       return;
     }
 
     const bounds = canvas.getBoundingClientRect();
     const pointerX = event.clientX - bounds.left;
     const pointerY = event.clientY - bounds.top;
+    const clickedBee = beeHitboxesRef.current.find((hitbox) =>
+      pointIsInside(pointerX, pointerY, hitbox),
+    );
+
+    if (clickedBee) {
+      const clickedBeeIndex = beesRef.current.findIndex((bee) => bee.id === clickedBee.id);
+
+      if (clickedBeeIndex >= 0) {
+        beesRef.current.splice(clickedBeeIndex, 1);
+      }
+
+      beeHitboxesRef.current = beeHitboxesRef.current.filter((hitbox) => hitbox.id !== clickedBee.id);
+      return;
+    }
+
+    if (hasSeedBroken || !seedHitbox) {
+      return;
+    }
 
     if (pointIsInside(pointerX, pointerY, seedHitbox)) {
       onSeedClickRef.current();
@@ -515,7 +858,7 @@ export function SunflowerCanvas({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLCanvasElement>) => {
-    if (hasSprouted || (event.key !== 'Enter' && event.key !== ' ')) {
+    if (hasSeedBroken || (event.key !== 'Enter' && event.key !== ' ')) {
       return;
     }
 
@@ -526,10 +869,10 @@ export function SunflowerCanvas({
   return (
     <canvas
       ref={canvasRef}
-      className={`sunflower-canvas ${hasSprouted ? 'is-sprouted' : 'is-seed'}`}
-      aria-label={hasSprouted ? 'Girasol principal animado' : 'Pipa lista para plantar'}
-      role={hasSprouted ? 'img' : 'button'}
-      tabIndex={hasSprouted ? -1 : 0}
+      className={`sunflower-canvas ${hasSeedBroken ? 'is-sprouted' : 'is-seed'}`}
+      aria-label={hasSeedBroken ? 'Planta en crecimiento' : 'Pipa lista para plantar'}
+      role={hasSeedBroken ? 'img' : 'button'}
+      tabIndex={hasSeedBroken ? -1 : 0}
       onKeyDown={handleKeyDown}
       onPointerDown={handlePointerDown}
     />

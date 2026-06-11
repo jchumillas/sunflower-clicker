@@ -1,6 +1,11 @@
 import { useEffect, useRef } from 'react';
 import type { KeyboardEvent, PointerEvent } from 'react';
 import beeSpriteUrl from '../assets/bee/bee.png';
+import cloud01Url from '../assets/cloud/cloud_01.png';
+import cloud02Url from '../assets/cloud/cloud_02.png';
+import cloud03Url from '../assets/cloud/cloud_03.png';
+import cloud04Url from '../assets/cloud/cloud_04.png';
+import cloud05Url from '../assets/cloud/cloud_05.png';
 import moonSpriteUrl from '../assets/moon/moon.png';
 import seedSpriteUrl from '../assets/seed.png';
 import soilSpriteUrl from '../assets/soil.png';
@@ -29,6 +34,13 @@ const BEE_FRAME_COUNT = 2;
 const BEE_FRAME_DURATION_MS = 50;
 const BEE_MIN_SPAWN_DELAY_MS = 5_000;
 const BEE_MAX_SPAWN_DELAY_MS = 10_000;
+const CLOUD_ASPECT_RATIOS = [
+  886 / 264,
+  481 / 383,
+  600 / 308,
+  452 / 219,
+  372 / 98,
+];
 const FRAME_DURATION_MS = 75;
 const SEED_WIDTH = 128;
 const SEED_HEIGHT = 178;
@@ -100,6 +112,23 @@ type Bee = {
   side: -1 | 1;
 };
 
+type Cloud = {
+  imageIndex: number;
+  startX: number;
+  y: number;
+  width: number;
+  speed: number;
+  opacity: number;
+};
+
+type BackgroundFlower = {
+  x: number;
+  bottom: number;
+  scale: number;
+  phase: number;
+  brightness: number;
+};
+
 const BACKGROUND_FLOWERS = [
   { x: 0.03, bottom: 0.59, scale: 0.18, phase: 2, brightness: 0.62 },
   { x: 0.13, bottom: 0.61, scale: 0.2, phase: 6, brightness: 0.64 },
@@ -135,7 +164,16 @@ const BACKGROUND_FLOWERS = [
   { x: 0.69, bottom: 0.98, scale: 0.52, phase: 9, brightness: 1 },
   { x: 0.82, bottom: 0.93, scale: 0.45, phase: 13, brightness: 1 },
   { x: 0.95, bottom: 0.96, scale: 0.5, phase: 17, brightness: 1 },
-];
+] satisfies BackgroundFlower[];
+
+const CLOUDS = [
+  { imageIndex: 4, startX: 0.08, y: 0.14, width: 0.2, speed: 9, opacity: 0.42 },
+  { imageIndex: 1, startX: 0.48, y: 0.1, width: 0.14, speed: 12, opacity: 0.34 },
+  { imageIndex: 3, startX: 0.78, y: 0.2, width: 0.16, speed: 14, opacity: 0.38 },
+  { imageIndex: 0, startX: 0.26, y: 0.25, width: 0.34, speed: 20, opacity: 0.5 },
+  { imageIndex: 2, startX: 0.66, y: 0.31, width: 0.23, speed: 24, opacity: 0.46 },
+  { imageIndex: 4, startX: 0.93, y: 0.38, width: 0.18, speed: 30, opacity: 0.4 },
+] satisfies Cloud[];
 
 const SKY_COLORS = {
   nightTop: { r: 9, g: 25, b: 64 },
@@ -298,6 +336,13 @@ export function SunflowerCanvas({
     const bees = beesRef.current;
 
     const beeSprite = new Image();
+    const cloudSprites = [
+      new Image(),
+      new Image(),
+      new Image(),
+      new Image(),
+      new Image(),
+    ];
     const mainSunflowerSprite = new Image();
     const backgroundSunflowerSprite = new Image();
     const seedSprite = new Image();
@@ -308,6 +353,7 @@ export function SunflowerCanvas({
     const sunCrownSprite = new Image();
     const sprites = [
       beeSprite,
+      ...cloudSprites,
       mainSunflowerSprite,
       backgroundSunflowerSprite,
       seedSprite,
@@ -341,6 +387,26 @@ export function SunflowerCanvas({
 
       context.fillStyle = gradient;
       context.fillRect(0, 0, canvasWidth, canvasHeight);
+    };
+
+    const drawClouds = (canvasWidth: number, canvasHeight: number, timestamp: number, cycleState: CycleState) => {
+      const nightOpacity = cycleState.isDay ? 1 : 0.28;
+
+      CLOUDS.forEach((cloud) => {
+        const sprite = cloudSprites[cloud.imageIndex];
+        const width = Math.max(90, canvasWidth * cloud.width);
+        const height = width / CLOUD_ASPECT_RATIOS[cloud.imageIndex];
+        const travelWidth = canvasWidth + width * 2;
+        const travelX = (canvasWidth * cloud.startX + (timestamp / 1_000) * cloud.speed) % travelWidth;
+        const x = travelX - width;
+        const y = canvasHeight * cloud.y;
+
+        context.save();
+        context.globalAlpha = cloud.opacity * nightOpacity;
+        context.drawImage(sprite, x, y, width, height);
+        context.drawImage(sprite, x - travelWidth, y, width, height);
+        context.restore();
+      });
     };
 
     const drawCelestialPath = (
@@ -463,7 +529,11 @@ export function SunflowerCanvas({
       const responsiveScale = Math.min(canvasWidth / 1100, canvasHeight / 720);
       const sceneScale = Math.min(1.22, Math.max(0.7, responsiveScale));
 
-      BACKGROUND_FLOWERS.forEach((flower) => {
+      BACKGROUND_FLOWERS.filter((flower) => {
+        const isInCentralNearClear = flower.bottom >= 0.72 && Math.abs(flower.x - 0.5) <= 0.24;
+
+        return !isInCentralNearClear;
+      }).forEach((flower) => {
         drawSpriteFrame(
           backgroundSunflowerSprite,
           (currentFrame + flower.phase) % TOTAL_FRAMES,
@@ -749,6 +819,7 @@ export function SunflowerCanvas({
 
       context.clearRect(0, 0, canvasWidth, canvasHeight);
       drawSky(canvasWidth, canvasHeight, cycleState);
+      drawClouds(canvasWidth, canvasHeight, timestamp, cycleState);
       drawCelestialPath(canvasWidth, canvasHeight, cycleState, timestamp);
       drawField(canvasWidth, canvasHeight);
       drawBackgroundSunflowers(canvasWidth, canvasHeight);
@@ -800,6 +871,11 @@ export function SunflowerCanvas({
     sprites.forEach((sprite) => sprite.addEventListener('load', handleSpriteLoad));
     mainSunflowerSprite.src = sunflowerSpriteUrl;
     beeSprite.src = beeSpriteUrl;
+    cloudSprites[0].src = cloud01Url;
+    cloudSprites[1].src = cloud02Url;
+    cloudSprites[2].src = cloud03Url;
+    cloudSprites[3].src = cloud04Url;
+    cloudSprites[4].src = cloud05Url;
     backgroundSunflowerSprite.src = backgroundSunflowerSpriteUrl;
     seedSprite.src = seedSpriteUrl;
     soilSprite.src = soilSpriteUrl;

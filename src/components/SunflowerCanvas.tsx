@@ -32,19 +32,26 @@ const BEE_MAX_SPAWN_DELAY_MS = 10_000;
 const FRAME_DURATION_MS = 75;
 const SEED_WIDTH = 128;
 const SEED_HEIGHT = 178;
-const DAY_DURATION_MS = 10_000;
+const DAY_DURATION_MS = 30_000;
 const NIGHT_DURATION_MS = 10_000;
 const TOTAL_CYCLE_MS = DAY_DURATION_MS + NIGHT_DURATION_MS;
-const MAX_GROWTH_DAY = 5;
+export const MAX_GROWTH_DAY = 5;
+
+export type PlantStage = 'seed' | 'sprout' | 'sunflower';
+export type CyclePhase = 'day' | 'night';
+
+export type HudInfo = {
+  day: number;
+  stage: PlantStage;
+  phase: CyclePhase;
+  cycleProgress: number;
+};
 
 type SunflowerCanvasProps = {
   hasSeedBroken: boolean;
-  seedClicks: number;
-  seedClicksToSprout: number;
-  plantHealth: number;
-  maxPlantHealth: number;
   onSeedClick: () => void;
   onBeePollinate: () => void;
+  onHudUpdate: (hud: HudInfo) => void;
 };
 
 type Rect = {
@@ -229,12 +236,9 @@ const getSkyColors = ({ isDay, progress }: CycleState) => {
 
 export function SunflowerCanvas({
   hasSeedBroken,
-  seedClicks,
-  seedClicksToSprout,
-  plantHealth,
-  maxPlantHealth,
   onSeedClick,
   onBeePollinate,
+  onHudUpdate,
 }: SunflowerCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const seedHitboxRef = useRef<Rect | null>(null);
@@ -242,10 +246,9 @@ export function SunflowerCanvas({
   const beeHitboxesRef = useRef<Array<Rect & { id: number }>>([]);
   const hasSeedBrokenRef = useRef(hasSeedBroken);
   const seedBrokenAtRef = useRef<number | null>(null);
-  const seedClicksRef = useRef(seedClicks);
-  const plantHealthRef = useRef(plantHealth);
   const onSeedClickRef = useRef(onSeedClick);
   const onBeePollinateRef = useRef(onBeePollinate);
+  const onHudUpdateRef = useRef(onHudUpdate);
 
   useEffect(() => {
     hasSeedBrokenRef.current = hasSeedBroken;
@@ -256,20 +259,16 @@ export function SunflowerCanvas({
   }, [hasSeedBroken]);
 
   useEffect(() => {
-    seedClicksRef.current = seedClicks;
-  }, [seedClicks]);
-
-  useEffect(() => {
-    plantHealthRef.current = plantHealth;
-  }, [plantHealth]);
-
-  useEffect(() => {
     onSeedClickRef.current = onSeedClick;
   }, [onSeedClick]);
 
   useEffect(() => {
     onBeePollinateRef.current = onBeePollinate;
   }, [onBeePollinate]);
+
+  useEffect(() => {
+    onHudUpdateRef.current = onHudUpdate;
+  }, [onHudUpdate]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -293,6 +292,9 @@ export function SunflowerCanvas({
     let lastBeeUpdateTime = 0;
     let nextBeeSpawnAt = Number.POSITIVE_INFINITY;
     let nextBeeId = 1;
+    let lastHudKey = '';
+    let lastHudProgress = -1;
+    let lastHudEmitTime = 0;
     const bees = beesRef.current;
 
     const beeSprite = new Image();
@@ -714,34 +716,27 @@ export function SunflowerCanvas({
       };
     };
 
-    const drawHud = (canvasWidth: number, cycleState: CycleState, lifecycle: PlantLifecycle) => {
-      const padding = Math.max(14, Math.min(canvasWidth * 0.02, 24));
-      const lineHeight = 26;
-      const healthBarWidth = 168;
-      const healthBarHeight = 12;
-      const healthBarY = padding + lineHeight * 3 + 6;
-      const healthAmount = clamp(plantHealthRef.current / maxPlantHealth, 0, 1);
-      const status =
-        lifecycle.stage === 'seed'
-          ? `Pipa: ${seedClicksRef.current}/${seedClicksToSprout}`
-          : lifecycle.stage === 'sprout'
-            ? 'Brote: sobreviviendo'
-            : `Girasol: dia ${lifecycle.day}/${MAX_GROWTH_DAY}`;
+    const emitHud = (timestamp: number, cycleState: CycleState, lifecycle: PlantLifecycle) => {
+      const phase: CyclePhase = cycleState.isDay ? 'day' : 'night';
+      const progress = clamp(cycleState.progress, 0, 1);
+      const discreteKey = `${lifecycle.day}|${lifecycle.stage}|${phase}`;
+      const discreteChanged = discreteKey !== lastHudKey;
+      const progressChanged = Math.abs(progress - lastHudProgress) >= 0.005;
+      const throttleReady = timestamp - lastHudEmitTime >= 100;
 
-      context.save();
-      context.font = '700 16px Inter, system-ui, sans-serif';
-      context.textBaseline = 'top';
-      context.fillStyle = cycleState.isDay ? 'rgba(37, 49, 29, 0.82)' : 'rgba(236, 242, 255, 0.86)';
-      context.fillText(`Dia ${lifecycle.day}`, padding, padding);
-      context.fillText(status, padding, padding + lineHeight);
-      context.fillText('Retos: proximamente', padding, padding + lineHeight * 2);
-      context.fillText(`Vida: ${plantHealthRef.current}/${maxPlantHealth}`, padding, padding + lineHeight * 3);
+      if (!discreteChanged && !(progressChanged && throttleReady)) {
+        return;
+      }
 
-      context.fillStyle = cycleState.isDay ? 'rgba(37, 49, 29, 0.25)' : 'rgba(236, 242, 255, 0.22)';
-      context.fillRect(padding, healthBarY, healthBarWidth, healthBarHeight);
-      context.fillStyle = healthAmount > 0.32 ? 'rgb(70, 184, 79)' : 'rgb(219, 75, 58)';
-      context.fillRect(padding, healthBarY, healthBarWidth * healthAmount, healthBarHeight);
-      context.restore();
+      lastHudKey = discreteKey;
+      lastHudProgress = progress;
+      lastHudEmitTime = timestamp;
+      onHudUpdateRef.current({
+        day: lifecycle.day,
+        stage: lifecycle.stage,
+        phase,
+        cycleProgress: progress,
+      });
     };
 
     const drawFrame = (timestamp: number) => {
@@ -768,7 +763,7 @@ export function SunflowerCanvas({
       }
 
       drawBees(timestamp);
-      drawHud(canvasWidth, cycleState, lifecycle);
+      emitHud(timestamp, cycleState, lifecycle);
     };
 
     const animate = (timestamp: number) => {
@@ -820,7 +815,7 @@ export function SunflowerCanvas({
       window.removeEventListener('resize', resizeCanvas);
       sprites.forEach((sprite) => sprite.removeEventListener('load', handleSpriteLoad));
     };
-  }, [seedClicksToSprout]);
+  }, []);
 
   const handlePointerDown = (event: PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;

@@ -25,8 +25,303 @@ body {
 }
 
 .game-shell {
+  position: relative;
   width: 100vw;
   height: 100vh;
+}
+
+/* ----------------------------- Game HUD ----------------------------- */
+.game-hud {
+  --hud-accent: #f4b740;
+  --hud-accent-soft: #ffd97a;
+  --hud-ink: #3a2a12;
+  --hud-ink-soft: rgba(58, 42, 18, 0.62);
+  --hud-surface: rgba(255, 250, 238, 0.78);
+  --hud-surface-edge: rgba(255, 255, 255, 0.55);
+  --hud-shadow: rgba(94, 62, 18, 0.28);
+
+  position: absolute;
+  top: clamp(14px, 2.4vw, 28px);
+  left: clamp(14px, 2.4vw, 28px);
+  width: clamp(232px, 24vw, 312px);
+  padding: 16px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border-radius: 20px;
+  background: linear-gradient(160deg, var(--hud-surface), rgba(255, 244, 222, 0.62));
+  border: 1px solid var(--hud-surface-edge);
+  box-shadow:
+    0 18px 40px -16px var(--hud-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(14px) saturate(1.1);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  color: var(--hud-ink);
+  pointer-events: none;
+  user-select: none;
+  transition: background 0.8s ease, color 0.8s ease, border-color 0.8s ease;
+  animation: hud-rise 0.5s ease both;
+}
+
+.game-hud[data-phase='night'] {
+  --hud-accent: #8fb6ff;
+  --hud-accent-soft: #c5d8ff;
+  --hud-ink: #eaf1ff;
+  --hud-ink-soft: rgba(225, 234, 255, 0.66);
+  --hud-surface: rgba(24, 36, 71, 0.74);
+  --hud-surface-edge: rgba(150, 178, 255, 0.32);
+  --hud-shadow: rgba(6, 14, 38, 0.55);
+  background: linear-gradient(160deg, rgba(28, 42, 84, 0.82), rgba(16, 26, 58, 0.7));
+}
+
+@keyframes hud-rise {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.game-hud__top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.game-hud__phase-badge {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
+.game-hud__phase-badge svg {
+  width: 24px;
+  height: 24px;
+}
+
+.game-hud__phase-badge--day {
+  color: #6b4a06;
+  background: radial-gradient(circle at 30% 28%, #fff2c4, #f6b33d 72%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+    0 0 18px rgba(246, 179, 61, 0.55);
+}
+
+.game-hud__phase-badge--night {
+  color: #dfe8ff;
+  background: radial-gradient(circle at 32% 30%, #6f8fd8, #2c3f78 78%);
+  box-shadow:
+    inset 0 0 0 1px rgba(180, 200, 255, 0.4),
+    0 0 18px rgba(120, 150, 230, 0.45);
+}
+
+.game-hud__day {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+  margin-right: auto;
+}
+
+.game-hud__day-number {
+  font-size: 1.18rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.game-hud__day-total {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--hud-ink-soft);
+}
+
+.game-hud__phase-name {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: var(--hud-ink);
+  background: color-mix(in srgb, var(--hud-accent) 30%, transparent);
+}
+
+.game-hud__cycle {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.game-hud__cycle-track {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--hud-ink) 16%, transparent);
+}
+
+.game-hud__cycle-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.25s linear, background 0.8s ease;
+}
+
+.game-hud__cycle-fill--day {
+  background: linear-gradient(90deg, #ffd97a, #f6a23d);
+}
+
+.game-hud__cycle-fill--night {
+  background: linear-gradient(90deg, #6f8fd8, #b9ccff);
+}
+
+.game-hud__cycle-caption {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--hud-ink-soft);
+}
+
+.game-hud__metric {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.game-hud__metric-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.game-hud__metric-icon {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+}
+
+.game-hud__metric-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.game-hud__metric-icon--health {
+  color: #e7503f;
+}
+
+.game-hud[data-phase='night'] .game-hud__metric-icon--health {
+  color: #ff8a7a;
+}
+
+.game-hud__metric-label {
+  letter-spacing: 0.02em;
+}
+
+.game-hud__metric-value {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+.game-hud__metric-max {
+  font-weight: 600;
+  color: var(--hud-ink-soft);
+}
+
+.game-hud__bar {
+  position: relative;
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--hud-ink) 18%, transparent);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.game-hud__bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #5fbf4a, #8fe06a);
+  box-shadow: 0 0 10px rgba(120, 220, 120, 0.45);
+  transition: width 0.4s ease, background 0.4s ease, box-shadow 0.4s ease;
+}
+
+.game-hud__bar-fill[data-level='mid'] {
+  background: linear-gradient(90deg, #f2a900, #ffd24a);
+  box-shadow: 0 0 10px rgba(247, 190, 60, 0.45);
+}
+
+.game-hud__bar-fill[data-level='low'] {
+  background: linear-gradient(90deg, #c83a2b, #ef5b48);
+  box-shadow: 0 0 12px rgba(230, 70, 50, 0.5);
+}
+
+.game-hud__bar-fill--seed {
+  background: linear-gradient(90deg, #c98a3a, #f2c266);
+  box-shadow: 0 0 10px rgba(210, 160, 70, 0.4);
+}
+
+.game-hud__stage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--hud-ink) 14%, transparent);
+}
+
+.game-hud__stage-track {
+  display: flex;
+  gap: 6px;
+}
+
+.game-hud__stage-step {
+  flex: 1;
+  height: 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--hud-ink) 18%, transparent);
+  transition: background 0.4s ease, box-shadow 0.4s ease;
+}
+
+.game-hud__stage-step[data-state='done'] {
+  background: var(--hud-accent-soft);
+}
+
+.game-hud__stage-step[data-state='active'] {
+  background: var(--hud-accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--hud-accent) 70%, transparent);
+}
+
+.game-hud__stage-text {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.game-hud__stage-name {
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.game-hud__stage-hint {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--hud-ink-soft);
+  text-align: right;
+}
+
+@media (max-width: 540px) {
+  .game-hud {
+    width: min(74vw, 280px);
+    padding: 13px 14px 15px;
+    gap: 11px;
+  }
 }
 
 .sunflower-canvas {
